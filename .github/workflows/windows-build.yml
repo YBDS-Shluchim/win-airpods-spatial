@@ -1,0 +1,81 @@
+name: Windows build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-2022
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Check out pinned vcpkg
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 4cb050be2cfa7a947cdd2dd1a70e24b17774c979
+          path: vcpkg
+
+      - name: Bootstrap vcpkg
+        run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      - name: Cache vcpkg binary packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: vcpkg-${{ runner.os }}-x64-windows-static-md-release-${{ hashFiles('audio/vcpkg.json', 'audio/triplets/*.cmake') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-x64-windows-static-md-release-
+
+      - name: Configure x64 Release build
+        shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
+        run: |
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          $toolchain = Join-Path $env:GITHUB_WORKSPACE "vcpkg/scripts/buildsystems/vcpkg.cmake"
+          $triplets = Join-Path $env:GITHUB_WORKSPACE "audio/triplets"
+          cmake -S audio -B build -A x64 -DCMAKE_BUILD_TYPE=Release "-DCMAKE_TOOLCHAIN_FILE=$toolchain" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md-release "-DVCPKG_OVERLAY_TRIPLETS=$triplets"
+
+      - name: Build CLI and player GUI
+        run: cmake --build build --config Release --parallel
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish Cavern Atmos decoder
+        run: dotnet publish tools/AtmosDecoder/AtmosDecoder.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o build/AtmosDecoder
+
+      - name: Run native tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Stage distributable files
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP "MagicAapSpatial"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "build/Release/magic-aap-spatial.exe" $stage
+          Copy-Item "build/Release/MagicAapSpatialPlayer.exe" $stage
+          Copy-Item "build/AtmosDecoder/AtmosDecoder.exe" $stage
+          Copy-Item "README.md" $stage
+          Copy-Item "build/_deps/miniaudio_source-src/LICENSE" (Join-Path $stage "miniaudio-LICENSE")
+          Copy-Item "build/vcpkg_installed/x64-windows-static-md-release/share/ffmpeg/copyright" (Join-Path $stage "ffmpeg-LICENSE")
+          Copy-Item "$env:USERPROFILE/.nuget/packages/cavern.format/2.1.0/LICENCE.md" (Join-Path $stage "Cavern-Format-LICENSE")
+          Copy-Item "$env:USERPROFILE/.nuget/packages/cavern/2.1.0/LICENCE.md" (Join-Path $stage "Cavern-LICENSE")
+          Compress-Archive -Path (Join-Path $stage "*") -DestinationPath (Join-Path $env:RUNNER_TEMP "MagicAapSpatial-win-x64.zip") -Force
+
+      - name: Upload Windows ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MagicAapSpatial-win-x64
+          path: ${{ runner.temp }}/MagicAapSpatial-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14

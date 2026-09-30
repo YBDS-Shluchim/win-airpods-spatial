@@ -1,0 +1,42 @@
+#pragma once
+
+#include "atmos_panner.hpp"
+#include "spatializer.hpp"
+
+#include <atomic>
+#include <filesystem>
+
+namespace MagicAapSpatial
+{
+enum class PlaybackSpatialMode
+{
+    Off,
+    Fixed,
+    Tracked
+};
+
+struct PlaybackSettings
+{
+    PlaybackSpatialMode mode = PlaybackSpatialMode::Fixed;
+    float stageWidthDegrees = 68.0f;
+    float roomReflection = 0.12f;
+    bool channelBedMode = false;
+    bool cavernAtmosObjects = false;
+    AtmosPannerSettings atmosPanner{};
+};
+
+class MediaPlayer final
+{
+public:
+    void SetHeadPose(float yawDegrees, float pitchDegrees);
+
+    int PlayFile(
+        const std::filesystem::path& path,
+        PlaybackSettings settings,
+        const std::atomic_bool& stopRequested);
+
+private:
+    std::atomic<float> yawDegrees_{0.0f};
+    std::atomic<float> pitchDegrees_{0.0f};
+};
+}

@@ -1,0 +1,16 @@
+{
+  "name": "magic-aap-spatial-audio",
+  "version-string": "0.1.0",
+  "builtin-baseline": "4cb050be2cfa7a947cdd2dd1a70e24b17774c979",
+  "dependencies": [
+    {
+      "name": "ffmpeg",
+      "default-features": false,
+      "features": [
+        "avcodec",
+        "avformat",
+        "swresample"
+      ]
+    }
+  ]
+}
