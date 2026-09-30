@@ -104,7 +104,7 @@ public:
             }
             atmosPanner_.Process(
                 currentObjectBlock_,
-                yawDegrees_.load(std::memory_order_relaxed),
+                ListenerYaw(),
                 pitchDegrees_.load(std::memory_order_relaxed),
                 objectOutputLeft_.data(),
                 objectOutputRight_.data(),
@@ -182,6 +182,12 @@ public:
     }
 
 private:
+    float ListenerYaw() const
+    {
+        const float yaw = yawDegrees_.load(std::memory_order_relaxed);
+        return settings_.reverseHeadTracking ? -yaw : yaw;
+    }
+
     void Render(float* output, ma_uint32 frameCount)
     {
         if (settings_.cavernAtmosObjects)
@@ -224,7 +230,7 @@ private:
             if (settings_.mode == PlaybackSpatialMode::Tracked)
             {
                 spatializer_.SetPose(Pose{
-                    yawDegrees_.load(std::memory_order_relaxed),
+                    ListenerYaw(),
                     pitchDegrees_.load(std::memory_order_relaxed),
                     0.0f});
             }
@@ -285,7 +291,7 @@ private:
                 }
                 atmosPanner_.Process(
                     currentObjectBlock_,
-                    yawDegrees_.load(std::memory_order_relaxed),
+                    ListenerYaw(),
                     pitchDegrees_.load(std::memory_order_relaxed),
                     objectOutputLeft_.data(),
                     objectOutputRight_.data(),

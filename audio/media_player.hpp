@@ -20,6 +20,7 @@ struct PlaybackSettings
     PlaybackSpatialMode mode = PlaybackSpatialMode::Fixed;
     float stageWidthDegrees = 68.0f;
     float roomReflection = 0.12f;
+    bool reverseHeadTracking = true;
     bool channelBedMode = false;
     bool cavernAtmosObjects = false;
     AtmosPannerSettings atmosPanner{};

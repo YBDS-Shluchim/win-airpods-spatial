@@ -36,6 +36,7 @@ constexpr int kRoomValueId = 1009;
 constexpr int kStatusId = 1010;
 constexpr int kDynamicLockId = 1011;
 constexpr int kBedLockId = 1012;
+constexpr int kReverseHeadTrackingId = 1013;
 
 struct PlayerWindow
 {
@@ -50,6 +51,7 @@ struct PlayerWindow
     HWND roomValue = nullptr;
     HWND dynamicLock = nullptr;
     HWND bedLock = nullptr;
+    HWND reverseHeadTracking = nullptr;
     HWND status = nullptr;
     MediaPlayer player;
     std::filesystem::path selectedFile;
@@ -162,6 +164,18 @@ void CreateControls(PlayerWindow& app)
     SendMessageW(app.bedLock, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Head-locked"));
     SendMessageW(app.bedLock, CB_SETCURSEL, 0, 0);
 
+    app.reverseHeadTracking = AddControl(
+        app.window,
+        L"BUTTON",
+        L"Reverse head tracking",
+        BS_AUTOCHECKBOX | WS_TABSTOP,
+        24,
+        548,
+        240,
+        24,
+        kReverseHeadTrackingId);
+    SendMessageW(app.reverseHeadTracking, BM_SETCHECK, BST_CHECKED, 0);
+
     AddControl(
         app.window,
         L"STATIC",
@@ -218,6 +232,7 @@ void StartPlayback(PlayerWindow& app)
     settings.cavernAtmosObjects = profile == 4;
     settings.stageWidthDegrees = static_cast<float>(SendMessageW(app.widthSlider, TBM_GETPOS, 0, 0));
     settings.roomReflection = static_cast<float>(SendMessageW(app.roomSlider, TBM_GETPOS, 0, 0)) / 100.0f;
+    settings.reverseHeadTracking = SendMessageW(app.reverseHeadTracking, BM_GETCHECK, 0, 0) == BST_CHECKED;
     settings.atmosPanner.objectWidth = settings.stageWidthDegrees / 68.0f;
     settings.atmosPanner.diffuseBedLevel = settings.roomReflection;
     settings.atmosPanner.dynamicObjects = SendMessageW(app.dynamicLock, CB_GETCURSEL, 0, 0) == 1
@@ -239,6 +254,7 @@ void StartPlayback(PlayerWindow& app)
     EnableWindow(app.roomSlider, FALSE);
     EnableWindow(app.dynamicLock, FALSE);
     EnableWindow(app.bedLock, FALSE);
+    EnableWindow(app.reverseHeadTracking, FALSE);
     SetStatus(app, L"Opening audio stream...");
 
     const auto selectedFile = app.selectedFile;
@@ -305,6 +321,7 @@ void StopPlayback(PlayerWindow& app)
     EnableWindow(app.roomSlider, TRUE);
     EnableWindow(app.dynamicLock, TRUE);
     EnableWindow(app.bedLock, TRUE);
+    EnableWindow(app.reverseHeadTracking, TRUE);
     SetStatus(app, L"Stopped.");
 }
 
@@ -355,6 +372,7 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
         EnableWindow(app->roomSlider, TRUE);
         EnableWindow(app->dynamicLock, TRUE);
         EnableWindow(app->bedLock, TRUE);
+        EnableWindow(app->reverseHeadTracking, TRUE);
         SetStatus(*app, wParam == 0
             ? L"Finished."
             : wParam == 3
