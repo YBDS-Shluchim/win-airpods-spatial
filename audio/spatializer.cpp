@@ -39,6 +39,22 @@ constexpr float kAppleHrtfSampleRate = 44100.0f;
 // the per-ear "auxiliary" scalar's meaning isn't confirmed, so it stays unused here.
 constexpr float kAppleHrtfGain = 10.5f;
 constexpr float kHalfPi = 1.57079632679489661923f;
+constexpr float kPi = 3.14159265358979323846f;
+// Average adult head radius and speed of sound, used only for the Woodworth ITD model
+// below (audio/diag.cpp confirmed the HRTF file's own modelingDelaySamples is a bulk
+// delay shared equally by both ears, so it carries no actual interaural time cue).
+constexpr float kHeadRadiusMeters = 0.0875f;
+constexpr float kSpeedOfSoundMetersPerSecond = 343.0f;
+
+// Woodworth-Schlosberg approximation: returns (left ear delay - right ear delay) in
+// seconds for a source at azimuthDegrees (positive = right). Clamped to +-90 degrees,
+// since real ITD plateaus near the interaural axis rather than continuing to grow.
+float WoodworthItdSeconds(float azimuthDegrees)
+{
+    const float azimuthRadians = std::clamp(azimuthDegrees, -90.0f, 90.0f) * kPi / 180.0f;
+    return (kHeadRadiusMeters / kSpeedOfSoundMetersPerSecond) *
+        (azimuthRadians + std::sin(azimuthRadians));
+}
 
 float WrapDegrees(float value)
 {
@@ -155,14 +171,21 @@ HrtfProfile::Filter BuildHrtfFilter(
     std::lock_guard queryLock(hrtf.queryMutex);
     const auto appleFilter = hrtf.apple->Interpolate(azimuthDegrees, elevationDegrees);
     const float sampleRateRatio = sampleRate / kAppleHrtfSampleRate;
-    const float delaySeconds = appleFilter.modelingDelaySamples / kAppleHrtfSampleRate;
-    const float delaySamples = std::max(0.0f, delaySeconds * sampleRate);
-    const auto integerDelay = static_cast<std::size_t>(delaySamples);
-    const float delayFraction = delaySamples - static_cast<float>(integerDelay);
+    const float bulkDelaySeconds = appleFilter.modelingDelaySamples / kAppleHrtfSampleRate;
+    // The file's modelingDelaySamples is a bulk propagation delay shared equally by both
+    // ears (confirmed empirically), so the actual left/right time difference comes from
+    // this separate model, added on top as a per-ear offset.
+    const float itdSeconds = WoodworthItdSeconds(azimuthDegrees);
+    const std::array<float, 2> earDelaySeconds{
+        bulkDelaySeconds + std::max(0.0f, itdSeconds),
+        bulkDelaySeconds + std::max(0.0f, -itdSeconds)};
 
     for (std::size_t ear = 0; ear < 2; ear++)
     {
         auto& destination = ear == 0 ? result.left : result.right;
+        const float delaySamples = std::max(0.0f, earDelaySeconds[ear] * sampleRate);
+        const auto integerDelay = static_cast<std::size_t>(delaySamples);
+        const float delayFraction = delaySamples - static_cast<float>(integerDelay);
         for (int tap = 0; tap < hrtf.filterLength; tap++)
         {
             const float sourcePosition = static_cast<float>(tap) / sampleRateRatio;
