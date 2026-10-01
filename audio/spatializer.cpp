@@ -37,7 +37,7 @@ constexpr float kAppleHrtfSampleRate = 44100.0f;
 // Flat calibration gain, measured empirically (see audio/diag.cpp) so that Fixed mode
 // at full blend matches dry loudness for a centered source at the default stage width;
 // the per-ear "auxiliary" scalar's meaning isn't confirmed, so it stays unused here.
-constexpr float kAppleHrtfGain = 10.5f;
+constexpr float kAppleHrtfGain = 12.0f;
 constexpr float kHalfPi = 1.57079632679489661923f;
 constexpr float kPi = 3.14159265358979323846f;
 // Average adult head radius and speed of sound, used only for the Woodworth ITD model
@@ -159,6 +159,86 @@ std::shared_ptr<SharedHrtf> OpenSharedHrtf(
 // Resamples/delays a single-position Apple HRTF measurement into a ready-to-convolve
 // FIR pair at the engine's sample rate. Shared by the stereo Spatializer (one call per
 // virtual speaker) and AtmosPanner (one call per directional object).
+
+// RBJ Audio EQ Cookbook biquad. Used only to build a short, static correction curve
+// applied to each built filter below (see ApplyCorrectionEq) - not a realtime per-sample
+// control path, so instances are cheap to construct per filter rebuild.
+struct Biquad final
+{
+    float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
+    float z1 = 0.0f, z2 = 0.0f;
+
+    float Process(float x)
+    {
+        const float y = b0 * x + z1;
+        z1 = b1 * x - a1 * y + z2;
+        z2 = b2 * x - a2 * y;
+        return y;
+    }
+};
+
+Biquad MakeLowShelf(float sampleRate, float freqHz, float gainDb)
+{
+    const float a = std::pow(10.0f, gainDb / 40.0f);
+    const float w0 = 2.0f * kPi * freqHz / sampleRate;
+    const float cosw0 = std::cos(w0);
+    const float alpha = std::sin(w0) / 2.0f * std::sqrt((a + 1.0f / a) + 2.0f);
+    const float sqrtA = std::sqrt(a);
+    const float b0 = a * ((a + 1.0f) - (a - 1.0f) * cosw0 + 2.0f * sqrtA * alpha);
+    const float b1 = 2.0f * a * ((a - 1.0f) - (a + 1.0f) * cosw0);
+    const float b2 = a * ((a + 1.0f) - (a - 1.0f) * cosw0 - 2.0f * sqrtA * alpha);
+    const float a0 = (a + 1.0f) + (a - 1.0f) * cosw0 + 2.0f * sqrtA * alpha;
+    const float a1 = -2.0f * ((a - 1.0f) + (a + 1.0f) * cosw0);
+    const float a2 = (a + 1.0f) + (a - 1.0f) * cosw0 - 2.0f * sqrtA * alpha;
+    return Biquad{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0, 0.0f, 0.0f};
+}
+
+Biquad MakeHighShelf(float sampleRate, float freqHz, float gainDb)
+{
+    const float a = std::pow(10.0f, gainDb / 40.0f);
+    const float w0 = 2.0f * kPi * freqHz / sampleRate;
+    const float cosw0 = std::cos(w0);
+    const float alpha = std::sin(w0) / 2.0f * std::sqrt((a + 1.0f / a) + 2.0f);
+    const float sqrtA = std::sqrt(a);
+    const float b0 = a * ((a + 1.0f) + (a - 1.0f) * cosw0 + 2.0f * sqrtA * alpha);
+    const float b1 = -2.0f * a * ((a - 1.0f) + (a + 1.0f) * cosw0);
+    const float b2 = a * ((a + 1.0f) + (a - 1.0f) * cosw0 - 2.0f * sqrtA * alpha);
+    const float a0 = (a + 1.0f) - (a - 1.0f) * cosw0 + 2.0f * sqrtA * alpha;
+    const float a1 = 2.0f * ((a - 1.0f) - (a + 1.0f) * cosw0);
+    const float a2 = (a + 1.0f) - (a - 1.0f) * cosw0 - 2.0f * sqrtA * alpha;
+    return Biquad{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0, 0.0f, 0.0f};
+}
+
+Biquad MakePeaking(float sampleRate, float freqHz, float gainDb, float q)
+{
+    const float a = std::pow(10.0f, gainDb / 40.0f);
+    const float w0 = 2.0f * kPi * freqHz / sampleRate;
+    const float cosw0 = std::cos(w0);
+    const float alpha = std::sin(w0) / (2.0f * q);
+    const float b0 = 1.0f + alpha * a;
+    const float b1 = -2.0f * cosw0;
+    const float b2 = 1.0f - alpha * a;
+    const float a0 = 1.0f + alpha / a;
+    const float a1 = -2.0f * cosw0;
+    const float a2 = 1.0f - alpha / a;
+    return Biquad{b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0, 0.0f, 0.0f};
+}
+
+// Compensates the comb-filter-like coloration from summing two delayed/filtered virtual
+// speaker paths (confirmed via single-tone measurement in audio/diag.cpp: roughly -5dB at
+// 40Hz, -4dB at 80Hz, +9dB at 4kHz, -2.5dB at 10kHz vs dry). Applied once per rebuilt
+// filter (not per audio sample), so it benefits both the stereo Spatializer and AtmosPanner.
+void ApplyCorrectionEq(std::array<float, HrtfProfile::kMaxFilterTaps>& taps, float sampleRate)
+{
+    auto lowShelf = MakeLowShelf(sampleRate, 150.0f, 5.0f);
+    auto peak = MakePeaking(sampleRate, 4000.0f, -8.0f, 1.0f);
+    auto highShelf = MakeHighShelf(sampleRate, 8000.0f, 2.5f);
+    for (auto& sample : taps)
+    {
+        sample = highShelf.Process(peak.Process(lowShelf.Process(sample)));
+    }
+}
+
 HrtfProfile::Filter BuildHrtfFilter(
     SharedHrtf& hrtf,
     float sampleRate,
@@ -207,6 +287,8 @@ HrtfProfile::Filter BuildHrtfFilter(
             std::min(HrtfProfile::kMaxFilterTaps,
                 static_cast<std::size_t>(hrtf.filterLength) + integerDelay + 1));
     }
+    ApplyCorrectionEq(result.left, sampleRate);
+    ApplyCorrectionEq(result.right, sampleRate);
     return result;
 }
 
