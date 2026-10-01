@@ -34,11 +34,11 @@ constexpr const char* kAppleHrtfFilename = "Apple_Generic_HRTF.bin";
 // the raw HRTF.bin grid predates the newer self-describing IR container that embeds
 // SampleRate explicitly, so this remains an inferred (not decoded) constant.
 constexpr float kAppleHrtfSampleRate = 44100.0f;
-// Flat calibration gain. The per-ear "auxiliary" scalar in the HRTF data was tried as a
-// per-position multiplier but measurably dropped loudness at typical listening angles
-// (its meaning isn't confirmed - see AppleHrtf::AverageAuxiliary), so it's left unused
-// for now in favor of this known-good flat level.
-constexpr float kAppleHrtfGain = 5.0f;
+// Flat calibration gain, measured empirically (see audio/diag.cpp) so that Fixed mode
+// at full blend matches dry loudness for a centered source at the default stage width;
+// the per-ear "auxiliary" scalar's meaning isn't confirmed, so it stays unused here.
+constexpr float kAppleHrtfGain = 10.5f;
+constexpr float kHalfPi = 1.57079632679489661923f;
 
 float WrapDegrees(float value)
 {
@@ -506,6 +506,12 @@ struct Spatializer::Impl final
 
         const float roomAmount = requestedRoomReflection.load(std::memory_order_relaxed);
         const float hrtfBlend = requestedHrtfBlend.load(std::memory_order_relaxed);
+        // Equal-power crossfade: a linear mix of dry and wet dips in loudness around the
+        // midpoint since the two signals are correlated but not in phase (measured with
+        // audio/diag.cpp). cos/sin keeps combined power closer to constant across the blend.
+        const float blendAngle = std::clamp(hrtfBlend, 0.0f, 1.0f) * kHalfPi;
+        const float dryWeight = std::cos(blendAngle);
+        const float wetWeight = std::sin(blendAngle);
         for (std::size_t frame = 0; frame < frameCount; frame++)
         {
             inputHistory[0][historyIndex] = inputLeft[frame];
@@ -527,8 +533,8 @@ struct Spatializer::Impl final
             const auto wet = room.Process(directLeft, directRight);
             const float spatialOutLeft = directLeft + roomAmount * wet[0];
             const float spatialOutRight = directRight + roomAmount * wet[1];
-            outputLeft[frame] = inputLeft[frame] + hrtfBlend * (spatialOutLeft - inputLeft[frame]);
-            outputRight[frame] = inputRight[frame] + hrtfBlend * (spatialOutRight - inputRight[frame]);
+            outputLeft[frame] = dryWeight * inputLeft[frame] + wetWeight * spatialOutLeft;
+            outputRight[frame] = dryWeight * inputRight[frame] + wetWeight * spatialOutRight;
             historyIndex = (historyIndex + 1) % kMaximumHrtfTaps;
         }
     }
