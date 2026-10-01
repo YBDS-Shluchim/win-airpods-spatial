@@ -43,6 +43,8 @@ constexpr int kBedLockId = 1012;
 constexpr int kReverseHeadTrackingId = 1013;
 constexpr int kHrtfProfileId = 1014;
 constexpr int kHrtfBrowseId = 1015;
+constexpr int kHrtfBlendId = 1016;
+constexpr int kHrtfBlendValueId = 1017;
 
 struct PlayerWindow
 {
@@ -52,10 +54,12 @@ struct PlayerWindow
     HWND stopButton = nullptr;
     HWND profile = nullptr;
     HWND hrtfProfile = nullptr;
+    HWND hrtfBlend = nullptr;
     HWND widthSlider = nullptr;
     HWND roomSlider = nullptr;
     HWND widthValue = nullptr;
     HWND roomValue = nullptr;
+    HWND hrtfBlendValue = nullptr;
     HWND dynamicLock = nullptr;
     HWND bedLock = nullptr;
     HWND reverseHeadTracking = nullptr;
@@ -268,10 +272,13 @@ void UpdateSliderLabels(PlayerWindow& app)
 {
     const int width = static_cast<int>(SendMessageW(app.widthSlider, TBM_GETPOS, 0, 0));
     const int room = static_cast<int>(SendMessageW(app.roomSlider, TBM_GETPOS, 0, 0));
+    const int hrtfBlend = static_cast<int>(SendMessageW(app.hrtfBlend, TBM_GETPOS, 0, 0));
     const auto widthText = std::to_wstring(width) + L" degrees";
     const auto roomText = std::to_wstring(room) + L"%";
     SetWindowTextW(app.widthValue, widthText.c_str());
     SetWindowTextW(app.roomValue, roomText.c_str());
+    const auto hrtfBlendText = std::to_wstring(hrtfBlend) + L"%";
+    SetWindowTextW(app.hrtfBlendValue, hrtfBlendText.c_str());
 }
 
 void CreateControls(PlayerWindow& app)
@@ -320,26 +327,41 @@ void CreateControls(PlayerWindow& app)
     PopulateHrtfProfiles(app);
     SetStatus(app, L"Choose a file to begin.");
 
-    AddControl(app.window, L"STATIC", L"Speaker width", SS_LEFT, 24, 329, 150, 24);
-    app.widthSlider = AddControl(app.window, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 24, 356, 570, 32, kWidthSliderId);
+    AddControl(app.window, L"STATIC", L"HRTF blend", SS_LEFT, 400, 318, 160, 24);
+    app.hrtfBlend = AddControl(
+        app.window,
+        TRACKBAR_CLASSW,
+        L"",
+        TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP,
+        400,
+        344,
+        210,
+        32,
+        kHrtfBlendId);
+    SendMessageW(app.hrtfBlend, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
+    SendMessageW(app.hrtfBlend, TBM_SETPOS, TRUE, 85);
+    app.hrtfBlendValue = AddControl(app.window, L"STATIC", L"85%", SS_RIGHT, 618, 344, 102, 28, kHrtfBlendValueId);
+
+    AddControl(app.window, L"STATIC", L"Speaker width", SS_LEFT, 24, 389, 150, 24);
+    app.widthSlider = AddControl(app.window, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 24, 416, 570, 32, kWidthSliderId);
     SendMessageW(app.widthSlider, TBM_SETRANGE, TRUE, MAKELPARAM(20, 120));
     SendMessageW(app.widthSlider, TBM_SETPOS, TRUE, 68);
-    app.widthValue = AddControl(app.window, L"STATIC", L"68 degrees", SS_RIGHT, 608, 356, 112, 28, kWidthValueId);
+    app.widthValue = AddControl(app.window, L"STATIC", L"68 degrees", SS_RIGHT, 608, 416, 112, 28, kWidthValueId);
 
-    AddControl(app.window, L"STATIC", L"Room / diffuse bed", SS_LEFT, 24, 404, 180, 24);
-    app.roomSlider = AddControl(app.window, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 24, 431, 570, 32, kRoomSliderId);
+    AddControl(app.window, L"STATIC", L"Room / diffuse bed", SS_LEFT, 24, 464, 180, 24);
+    app.roomSlider = AddControl(app.window, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 24, 491, 570, 32, kRoomSliderId);
     SendMessageW(app.roomSlider, TBM_SETRANGE, TRUE, MAKELPARAM(0, 35));
     SendMessageW(app.roomSlider, TBM_SETPOS, TRUE, 8);
-    app.roomValue = AddControl(app.window, L"STATIC", L"8%", SS_RIGHT, 608, 431, 112, 28, kRoomValueId);
+    app.roomValue = AddControl(app.window, L"STATIC", L"8%", SS_RIGHT, 608, 491, 112, 28, kRoomValueId);
 
-    AddControl(app.window, L"STATIC", L"JOC objects", SS_LEFT, 24, 484, 150, 24);
-    app.dynamicLock = AddControl(app.window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 24, 510, 300, 150, kDynamicLockId);
+    AddControl(app.window, L"STATIC", L"JOC objects", SS_LEFT, 24, 544, 150, 24);
+    app.dynamicLock = AddControl(app.window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 24, 570, 300, 150, kDynamicLockId);
     SendMessageW(app.dynamicLock, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"World-locked"));
     SendMessageW(app.dynamicLock, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Head-locked"));
     SendMessageW(app.dynamicLock, CB_SETCURSEL, 0, 0);
 
-    AddControl(app.window, L"STATIC", L"Bed / ambience", SS_LEFT, 376, 484, 160, 24);
-    app.bedLock = AddControl(app.window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 376, 510, 344, 150, kBedLockId);
+    AddControl(app.window, L"STATIC", L"Bed / ambience", SS_LEFT, 376, 544, 160, 24);
+    app.bedLock = AddControl(app.window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 376, 570, 344, 150, kBedLockId);
     SendMessageW(app.bedLock, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Diffuse / head-relative"));
     SendMessageW(app.bedLock, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"World-locked"));
     SendMessageW(app.bedLock, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Head-locked"));
@@ -351,7 +373,7 @@ void CreateControls(PlayerWindow& app)
         L"Reverse head tracking",
         BS_AUTOCHECKBOX | WS_TABSTOP,
         24,
-        548,
+        608,
         240,
         24,
         kReverseHeadTrackingId);
@@ -363,7 +385,7 @@ void CreateControls(PlayerWindow& app)
         L"E-AC-3 channel bed is an FFmpeg approximation. Cavern mode decodes JOC objects; Cavern's non-commercial license applies.",
         SS_LEFT,
         24,
-        584,
+        644,
         696,
         44);
 }
@@ -413,6 +435,7 @@ void StartPlayback(PlayerWindow& app)
     settings.cavernAtmosObjects = profile == 4;
     settings.stageWidthDegrees = static_cast<float>(SendMessageW(app.widthSlider, TBM_GETPOS, 0, 0));
     settings.roomReflection = static_cast<float>(SendMessageW(app.roomSlider, TBM_GETPOS, 0, 0)) / 100.0f;
+    settings.hrtfBlend = static_cast<float>(SendMessageW(app.hrtfBlend, TBM_GETPOS, 0, 0)) / 100.0f;
     settings.reverseHeadTracking = SendMessageW(app.reverseHeadTracking, BM_GETCHECK, 0, 0) == BST_CHECKED;
     settings.atmosPanner.objectWidth = settings.stageWidthDegrees / 68.0f;
     settings.atmosPanner.diffuseBedLevel = settings.roomReflection;
@@ -428,6 +451,7 @@ void StartPlayback(PlayerWindow& app)
     app.trackingStopRequested.store(false, std::memory_order_relaxed);
     app.activeTrackingProfile = 0;
     app.player.SetHeadPose(0.0f, 0.0f);
+    app.player.SetHrtfBlend(settings.hrtfBlend);
     app.isPlaying = true;
     EnableWindow(app.playButton, FALSE);
     EnableWindow(app.stopButton, TRUE);
@@ -564,6 +588,8 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
         break;
     case WM_HSCROLL:
         UpdateSliderLabels(*app);
+        app->player.SetHrtfBlend(
+            static_cast<float>(SendMessageW(app->hrtfBlend, TBM_GETPOS, 0, 0)) / 100.0f);
         return 0;
     case kPlaybackFinished:
         if (app->playbackThread.joinable()) app->playbackThread.join();
@@ -630,7 +656,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         780,
-        700,
+        760,
         nullptr,
         nullptr,
         instance,

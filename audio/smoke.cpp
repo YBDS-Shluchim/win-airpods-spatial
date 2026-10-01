@@ -171,6 +171,14 @@ int main(int argc, char** argv)
     }
     assert(roomChanged);
 
+    Spatializer dryBlend;
+    dryBlend.SetMode(Mode::Tracked);
+    dryBlend.SetPose(Pose{45.0f, 0.0f, 0.0f});
+    dryBlend.SetHrtfBlend(0.0f);
+    dryBlend.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
+    assert(outputLeft == inputLeft);
+    assert(outputRight == inputRight);
+
     spatializer.SetMode(Mode::Off);
     spatializer.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
     assert(outputLeft == inputLeft);

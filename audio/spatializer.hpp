@@ -50,6 +50,7 @@ public:
     void SetPose(Pose pose);
     void SetStageWidth(float degrees);
     void SetRoomReflection(float amount);
+    void SetHrtfBlend(float amount);
     void SetHrtfProfile(std::shared_ptr<const HrtfProfile> profile);
     void Reset();
     bool IsHrtfReady() const;

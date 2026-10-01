@@ -40,6 +40,7 @@ public:
         PlaybackSettings settings,
         const std::atomic<float>& yawDegrees,
         const std::atomic<float>& pitchDegrees,
+        const std::atomic<float>& hrtfBlend,
         const std::atomic<std::shared_ptr<const HrtfProfile>>& hrtfProfile)
         : interleaved_(kCallbackChunkFrames * 4),
           inputLeft_(kCallbackChunkFrames),
@@ -55,6 +56,7 @@ public:
           settings_(settings),
           yawDegrees_(yawDegrees),
           pitchDegrees_(pitchDegrees),
+          hrtfBlend_(hrtfBlend),
           hrtfProfile_(hrtfProfile)
     {
         const auto mode = settings.mode == PlaybackSpatialMode::Tracked
@@ -248,6 +250,9 @@ private:
                 ambienceSpatializer_.SetHrtfProfile(selectedProfile);
                 activeHrtfProfile_ = std::move(selectedProfile);
             }
+            const float hrtfBlend = hrtfBlend_.load(std::memory_order_relaxed);
+            spatializer_.SetHrtfBlend(hrtfBlend);
+            ambienceSpatializer_.SetHrtfBlend(hrtfBlend);
 
             spatializer_.Process(
                 inputLeft_.data(),
@@ -356,6 +361,7 @@ private:
     PlaybackSettings settings_;
     const std::atomic<float>& yawDegrees_;
     const std::atomic<float>& pitchDegrees_;
+    const std::atomic<float>& hrtfBlend_;
     const std::atomic<std::shared_ptr<const HrtfProfile>>& hrtfProfile_;
     std::shared_ptr<const HrtfProfile> activeHrtfProfile_;
     Spatializer spatializer_;
@@ -388,7 +394,7 @@ int MediaPlayer::PlayFile(
     const auto& playbackPath = decodedPath ? *decodedPath : path;
     const auto play = [&]() -> int
     {
-        PlaybackSession session(settings, yawDegrees_, pitchDegrees_, hrtfProfile_);
+        PlaybackSession session(settings, yawDegrees_, pitchDegrees_, hrtfBlend_, hrtfProfile_);
         auto audioResult = session.Initialize(playbackPath);
         if (audioResult != MA_SUCCESS)
         {
@@ -427,6 +433,12 @@ void MediaPlayer::SetHeadPose(float yawDegrees, float pitchDegrees)
 {
     yawDegrees_.store(yawDegrees, std::memory_order_relaxed);
     pitchDegrees_.store(pitchDegrees, std::memory_order_relaxed);
+}
+
+void MediaPlayer::SetHrtfBlend(float amount)
+{
+    hrtfBlend_.store(std::isfinite(amount) ? std::clamp(amount, 0.0f, 1.0f) : 0.85f,
+        std::memory_order_relaxed);
 }
 
 void MediaPlayer::SetHrtfProfile(std::shared_ptr<const HrtfProfile> profile)

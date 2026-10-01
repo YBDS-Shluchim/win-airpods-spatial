@@ -30,7 +30,7 @@ namespace
 {
 constexpr float kPi = 3.14159265358979323846f;
 constexpr float kMetersPerSofaRadius = 1.4f;
-constexpr float kSpatialGain = 0.70710678f;
+constexpr float kSpatialGain = 0.84f;
 constexpr std::size_t kMaximumHrtfTaps = 1024;
 constexpr float kRoomDecaySeconds = 0.38f;
 constexpr const char* kHrtfFilename = "MIT_KEMAR_normal_pinna.sofa";
@@ -500,6 +500,7 @@ struct Spatializer::Impl final
             smoothing);
 
         const float roomAmount = requestedRoomReflection.load(std::memory_order_relaxed);
+        const float hrtfBlend = requestedHrtfBlend.load(std::memory_order_relaxed);
         for (std::size_t frame = 0; frame < frameCount; frame++)
         {
             inputHistory[0][historyIndex] = inputLeft[frame];
@@ -519,8 +520,10 @@ struct Spatializer::Impl final
             const float directLeft = spatialLeft * kSpatialGain;
             const float directRight = spatialRight * kSpatialGain;
             const auto wet = room.Process(directLeft, directRight);
-            outputLeft[frame] = directLeft + roomAmount * wet[0];
-            outputRight[frame] = directRight + roomAmount * wet[1];
+            const float spatialOutLeft = directLeft + roomAmount * wet[0];
+            const float spatialOutRight = directRight + roomAmount * wet[1];
+            outputLeft[frame] = inputLeft[frame] + hrtfBlend * (spatialOutLeft - inputLeft[frame]);
+            outputRight[frame] = inputRight[frame] + hrtfBlend * (spatialOutRight - inputRight[frame]);
             historyIndex = (historyIndex + 1) % kMaximumHrtfTaps;
         }
     }
@@ -536,6 +539,7 @@ struct Spatializer::Impl final
     std::atomic<float> requestedPitch{0.0f};
     std::atomic<float> requestedStageWidth{68.0f};
     std::atomic<float> requestedRoomReflection{0.08f};
+    std::atomic<float> requestedHrtfBlend{0.85f};
     Mode activeMode = Mode::Off;
     float smoothedYaw = 0.0f;
     float smoothedPitch = 0.0f;
@@ -583,6 +587,13 @@ void Spatializer::SetRoomReflection(float amount)
 {
     impl_->requestedRoomReflection.store(
         std::isfinite(amount) ? std::clamp(amount, 0.0f, 0.35f) : 0.08f,
+        std::memory_order_relaxed);
+}
+
+void Spatializer::SetHrtfBlend(float amount)
+{
+    impl_->requestedHrtfBlend.store(
+        std::isfinite(amount) ? std::clamp(amount, 0.0f, 1.0f) : 0.85f,
         std::memory_order_relaxed);
 }
 

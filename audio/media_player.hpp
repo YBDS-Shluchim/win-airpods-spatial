@@ -21,6 +21,7 @@ struct PlaybackSettings
     PlaybackSpatialMode mode = PlaybackSpatialMode::Fixed;
     float stageWidthDegrees = 68.0f;
     float roomReflection = 0.08f;
+    float hrtfBlend = 0.85f;
     bool reverseHeadTracking = true;
     bool channelBedMode = false;
     bool cavernAtmosObjects = false;
@@ -31,6 +32,7 @@ class MediaPlayer final
 {
 public:
     void SetHeadPose(float yawDegrees, float pitchDegrees);
+    void SetHrtfBlend(float amount);
     void SetHrtfProfile(std::shared_ptr<const HrtfProfile> profile);
 
     int PlayFile(
@@ -41,6 +43,7 @@ public:
 private:
     std::atomic<float> yawDegrees_{0.0f};
     std::atomic<float> pitchDegrees_{0.0f};
+    std::atomic<float> hrtfBlend_{0.85f};
     std::atomic<std::shared_ptr<const HrtfProfile>> hrtfProfile_{};
 };
 }
