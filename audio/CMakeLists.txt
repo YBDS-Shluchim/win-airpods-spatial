@@ -3,6 +3,23 @@ project(MagicAapSpatial LANGUAGES CXX)
 
 include(FetchContent)
 find_package(FFMPEG QUIET)
+find_package(mysofa CONFIG REQUIRED)
+if(TARGET mysofa::mysofa-static)
+	set(MYSOFA_TARGET mysofa::mysofa-static)
+else()
+	set(MYSOFA_TARGET mysofa::mysofa-shared)
+endif()
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/assets")
+configure_file(
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/MIT_KEMAR_normal_pinna.sofa"
+	"${CMAKE_CURRENT_BINARY_DIR}/assets/MIT_KEMAR_normal_pinna.sofa"
+	COPYONLY)
+configure_file(
+	"${CMAKE_CURRENT_SOURCE_DIR}/assets/THIRD_PARTY_NOTICES.md"
+	"${CMAKE_CURRENT_BINARY_DIR}/assets/THIRD_PARTY_NOTICES.md"
+	COPYONLY)
+
 FetchContent_Declare(miniaudio_source
 	GIT_REPOSITORY https://github.com/mackron/miniaudio.git
 	GIT_TAG 0.11.25
@@ -13,6 +30,7 @@ FetchContent_MakeAvailable(miniaudio_source)
 add_library(magic_aap_spatial_dsp spatializer.cpp)
 target_compile_features(magic_aap_spatial_dsp PUBLIC cxx_std_20)
 target_include_directories(magic_aap_spatial_dsp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(magic_aap_spatial_dsp PUBLIC ${MYSOFA_TARGET})
 
 add_library(magic_aap_spatial_core ../src/core.cpp)
 target_compile_features(magic_aap_spatial_core PUBLIC cxx_std_20)

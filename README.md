@@ -25,6 +25,8 @@ The pose estimator validates the received quaternion, calibrates neutral orienta
 
 The GUI exposes head-tracked stereo, fixed stereo, bypass, FFmpeg channel-bed, and Cavern JOC object profiles, plus sliders for stage width and ambience. In Cavern mode, dynamic objects default to world-locked and the bed defaults to diffuse/head-relative; each policy can be toggled independently between head-locked and world-locked. `AtmosDecoder.exe` streams Cavern-decoded object PCM and positions to the C++ panner, which applies live MagicAAP head pose. Cavern.Format by Bence Sgánetz is distributed under its custom non-commercial/share-alike license with attribution requirements; the Windows ZIP includes both Cavern license notices. Do not use the Cavern-enabled artifact commercially without permission from its author.
 
+Stereo spatialization uses libmysofa with the generic MIT KEMAR measured HRTF dataset. Fixed and head-tracked profiles share the same binaural renderer; tracking changes the virtual speaker angles using the listener pose. A low-level small-room reflection and late-decay model is adjustable from the ambience slider. This is not Apple's proprietary or personalized Spatial Audio renderer; individual HRTFs can sound different between listeners. The KEMAR dataset and libmysofa notices are included in `audio/assets/THIRD_PARTY_NOTICES.md` and copied beside the built application.
+
 ## E-AC-3 / Atmos
 
 The GUI's FFmpeg channel-bed profile remains a channel-based fallback. The separate Cavern JOC profile decodes E-AC-3 object metadata and emits per-object samples and positions; C++ applies the selected lock policies during live playback. This is the actual object-based mode; it is distinct from the FFmpeg downmix.

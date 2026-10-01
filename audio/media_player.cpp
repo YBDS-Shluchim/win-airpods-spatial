@@ -63,6 +63,10 @@ public:
         spatializer_.SetMode(mode);
         spatializer_.SetStageWidth(settings.stageWidthDegrees);
         spatializer_.SetRoomReflection(settings.roomReflection);
+        if (!spatializer_.IsHrtfReady())
+        {
+            std::cerr << "Measured HRTF data was not found; spatial playback will use unprocessed stereo.\n";
+        }
         ambienceSpatializer_.SetMode(Mode::Fixed);
         ambienceSpatializer_.SetStageWidth(120.0f);
         ambienceSpatializer_.SetRoomReflection(settings.roomReflection * 0.5f);
@@ -256,8 +260,8 @@ private:
             {
                 const float ambientLeft = settings_.channelBedMode ? ambienceOutputLeft_[index] : 0.0f;
                 const float ambientRight = settings_.channelBedMode ? ambienceOutputRight_[index] : 0.0f;
-                output[(renderedFrames + index) * 2] = std::clamp(outputLeft_[index] + ambientLeft, -0.98f, 0.98f);
-                output[(renderedFrames + index) * 2 + 1] = std::clamp(outputRight_[index] + ambientRight, -0.98f, 0.98f);
+                output[(renderedFrames + index) * 2] = outputLeft_[index] + ambientLeft;
+                output[(renderedFrames + index) * 2 + 1] = outputRight_[index] + ambientRight;
             }
             renderedFrames += static_cast<ma_uint32>(frames);
             if (decodedFrames < chunkFrames)

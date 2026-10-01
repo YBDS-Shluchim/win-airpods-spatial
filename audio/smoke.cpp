@@ -23,6 +23,7 @@ int main()
     }
 
     Spatializer spatializer;
+    assert(spatializer.IsHrtfReady());
     spatializer.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
     assert(outputLeft == inputLeft);
     assert(outputRight == inputRight);
@@ -40,6 +41,21 @@ int main()
     }
     assert(changed);
 
+    const auto fixedLeft = outputLeft;
+    const auto fixedRight = outputRight;
+    Spatializer centeredTracked;
+    centeredTracked.SetMode(Mode::Tracked);
+    centeredTracked.SetPose(Pose{});
+    std::array<float, frameCount> centeredLeft{};
+    std::array<float, frameCount> centeredRight{};
+    centeredTracked.Process(
+        inputLeft.data(), inputRight.data(), centeredLeft.data(), centeredRight.data(), frameCount);
+    for (std::size_t index = 0; index < frameCount; index++)
+    {
+        assert(std::abs(centeredLeft[index] - fixedLeft[index]) < 0.00001f);
+        assert(std::abs(centeredRight[index] - fixedRight[index]) < 0.00001f);
+    }
+
     spatializer.SetMode(Mode::Tracked);
     spatializer.SetPose(Pose{70.0f, 20.0f, 0.0f});
     spatializer.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
@@ -50,6 +66,39 @@ int main()
         assert(std::abs(outputLeft[index]) <= 1.0f);
         assert(std::abs(outputRight[index]) <= 1.0f);
     }
+
+    Spatializer turnedTracked;
+    turnedTracked.SetMode(Mode::Tracked);
+    turnedTracked.SetPose(Pose{70.0f, 20.0f, 0.0f});
+    std::array<float, frameCount> turnedLeft{};
+    std::array<float, frameCount> turnedRight{};
+    turnedTracked.Process(
+        inputLeft.data(), inputRight.data(), turnedLeft.data(), turnedRight.data(), frameCount);
+    bool poseChanged = false;
+    for (std::size_t index = 0; index < frameCount; index++)
+    {
+        poseChanged = poseChanged || std::abs(turnedLeft[index] - centeredLeft[index]) > 0.001f;
+    }
+    assert(poseChanged);
+
+    Spatializer dryRoom;
+    Spatializer wetRoom;
+    dryRoom.SetMode(Mode::Fixed);
+    wetRoom.SetMode(Mode::Fixed);
+    dryRoom.SetRoomReflection(0.0f);
+    wetRoom.SetRoomReflection(0.08f);
+    std::array<float, frameCount> dryLeft{};
+    std::array<float, frameCount> dryRight{};
+    std::array<float, frameCount> wetLeft{};
+    std::array<float, frameCount> wetRight{};
+    dryRoom.Process(inputLeft.data(), inputRight.data(), dryLeft.data(), dryRight.data(), frameCount);
+    wetRoom.Process(inputLeft.data(), inputRight.data(), wetLeft.data(), wetRight.data(), frameCount);
+    bool roomChanged = false;
+    for (std::size_t index = 0; index < frameCount; index++)
+    {
+        roomChanged = roomChanged || std::abs(wetLeft[index] - dryLeft[index]) > 0.0001f;
+    }
+    assert(roomChanged);
 
     spatializer.SetMode(Mode::Off);
     spatializer.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);

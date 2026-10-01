@@ -181,8 +181,8 @@ void CreateControls(PlayerWindow& app)
     AddControl(app.window, L"STATIC", L"Room / diffuse bed", SS_LEFT, 24, 404, 180, 24);
     app.roomSlider = AddControl(app.window, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 24, 431, 570, 32, kRoomSliderId);
     SendMessageW(app.roomSlider, TBM_SETRANGE, TRUE, MAKELPARAM(0, 35));
-    SendMessageW(app.roomSlider, TBM_SETPOS, TRUE, 12);
-    app.roomValue = AddControl(app.window, L"STATIC", L"12%", SS_RIGHT, 608, 431, 112, 28, kRoomValueId);
+    SendMessageW(app.roomSlider, TBM_SETPOS, TRUE, 8);
+    app.roomValue = AddControl(app.window, L"STATIC", L"8%", SS_RIGHT, 608, 431, 112, 28, kRoomValueId);
 
     AddControl(app.window, L"STATIC", L"JOC objects", SS_LEFT, 24, 484, 150, 24);
     app.dynamicLock = AddControl(app.window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL, 24, 510, 300, 150, kDynamicLockId);
