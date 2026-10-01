@@ -1,8 +1,6 @@
 #include "spatializer.hpp"
 #include "apple_hrtf.hpp"
 
-#include <mysofa.h>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -10,7 +8,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -29,14 +26,17 @@ namespace MagicAapSpatial
 {
 namespace
 {
-constexpr float kPi = 3.14159265358979323846f;
-constexpr float kMetersPerSofaRadius = 1.4f;
 constexpr float kSpatialGain = 0.84f;
-constexpr std::size_t kMaximumHrtfTaps = 1024;
+constexpr std::size_t kMaximumHrtfTaps = HrtfProfile::kMaxFilterTaps;
 constexpr float kRoomDecaySeconds = 0.38f;
-constexpr const char* kHrtfFilename = "MIT_KEMAR_normal_pinna.sofa";
 constexpr const char* kAppleHrtfFilename = "Apple_Generic_HRTF.bin";
+// Confirmed present as a literal float constant in Apple's AudioDSP.component binary;
+// the raw HRTF.bin grid predates the newer self-describing IR container that embeds
+// SampleRate explicitly, so this remains an inferred (not decoded) constant.
 constexpr float kAppleHrtfSampleRate = 44100.0f;
+// Overall makeup gain, calibrated so the dataset-average per-ear "auxiliary" scalar
+// (see AppleHrtf::AverageAuxiliary) produces roughly the same loudness this constant
+// alone used to produce. The per-position/per-ear variation now comes from the file.
 constexpr float kAppleHrtfGain = 5.0f;
 
 float WrapDegrees(float value)
@@ -76,15 +76,12 @@ std::filesystem::path FindHrtfFile()
     {
         candidates.push_back(workingDirectory / "assets" / kAppleHrtfFilename);
         candidates.push_back(workingDirectory / "audio" / "assets" / kAppleHrtfFilename);
-        candidates.push_back(workingDirectory / "assets" / kHrtfFilename);
-        candidates.push_back(workingDirectory / "audio" / "assets" / kHrtfFilename);
     }
 
     const auto executableDirectory = ExecutableDirectory();
     if (!executableDirectory.empty())
     {
         candidates.push_back(executableDirectory / "assets" / kAppleHrtfFilename);
-        candidates.push_back(executableDirectory / "assets" / kHrtfFilename);
     }
 
     for (const auto& candidate : candidates)
@@ -100,12 +97,6 @@ std::filesystem::path FindHrtfFile()
 
 struct SharedHrtf final
 {
-    ~SharedHrtf()
-    {
-        if (easy != nullptr) mysofa_close(easy);
-    }
-
-    MYSOFA_EASY* easy = nullptr;
     std::shared_ptr<const AppleHrtf> apple;
     int filterLength = 0;
     std::filesystem::path path;
@@ -133,48 +124,71 @@ std::shared_ptr<SharedHrtf> OpenSharedHrtf(
         return cached;
     }
 
-    if (auto apple = AppleHrtf::Load(path))
-    {
-        auto loaded = std::make_shared<SharedHrtf>();
-        loaded->apple = std::move(apple);
-        loaded->filterLength = static_cast<int>(std::ceil(
-            static_cast<float>(AppleHrtf::kTapCount) * sampleRate / kAppleHrtfSampleRate));
-        loaded->path = canonicalPath;
-        loaded->sampleRate = sampleRate;
-        cachedPath = canonicalPath;
-        cachedSampleRate = sampleRate;
-        cachedHrtf = loaded;
-        return loaded;
-    }
-
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) return {};
-    const auto end = file.tellg();
-    if (end <= 0 || end > 128 * 1024 * 1024) return {};
-    std::vector<char> data(static_cast<std::size_t>(end));
-    file.seekg(0, std::ios::beg);
-    if (!file.read(data.data(), static_cast<std::streamsize>(data.size()))) return {};
-
-    int filterLength = 0;
-    int errorCode = 0;
-    auto* easy = mysofa_open_data_no_norm(
-        data.data(), static_cast<long>(data.size()), sampleRate, &filterLength, &errorCode);
-    if (easy == nullptr || filterLength <= 0 ||
-        filterLength > static_cast<int>(kMaximumHrtfTaps - 64))
-    {
-        if (easy != nullptr) mysofa_close(easy);
-        return {};
-    }
+    auto apple = AppleHrtf::Load(path);
+    if (apple == nullptr) return {};
 
     auto loaded = std::make_shared<SharedHrtf>();
-    loaded->easy = easy;
-    loaded->filterLength = filterLength;
+    loaded->apple = std::move(apple);
+    loaded->filterLength = static_cast<int>(std::ceil(
+        static_cast<float>(AppleHrtf::kTapCount) * sampleRate / kAppleHrtfSampleRate));
     loaded->path = canonicalPath;
     loaded->sampleRate = sampleRate;
     cachedPath = canonicalPath;
     cachedSampleRate = sampleRate;
     cachedHrtf = loaded;
     return loaded;
+}
+
+// Resamples/delays a single-position Apple HRTF measurement into a ready-to-convolve
+// FIR pair at the engine's sample rate. Shared by the stereo Spatializer (one call per
+// virtual speaker) and AtmosPanner (one call per directional object).
+HrtfProfile::Filter BuildHrtfFilter(
+    SharedHrtf& hrtf,
+    float sampleRate,
+    float azimuthDegrees,
+    float elevationDegrees)
+{
+    HrtfProfile::Filter result;
+    if (hrtf.apple == nullptr) return result;
+
+    std::lock_guard queryLock(hrtf.queryMutex);
+    const auto appleFilter = hrtf.apple->Interpolate(azimuthDegrees, elevationDegrees);
+    const float sampleRateRatio = sampleRate / kAppleHrtfSampleRate;
+    const float averageAuxiliary = hrtf.apple->AverageAuxiliary();
+    const float auxiliaryGain = averageAuxiliary > 1e-6f
+        ? kAppleHrtfGain / averageAuxiliary
+        : kAppleHrtfGain;
+    const float delaySeconds = appleFilter.modelingDelaySamples / kAppleHrtfSampleRate;
+    const float delaySamples = std::max(0.0f, delaySeconds * sampleRate);
+    const auto integerDelay = static_cast<std::size_t>(delaySamples);
+    const float delayFraction = delaySamples - static_cast<float>(integerDelay);
+
+    for (std::size_t ear = 0; ear < 2; ear++)
+    {
+        auto& destination = ear == 0 ? result.left : result.right;
+        const float earGain = auxiliaryGain * appleFilter.auxiliary[ear];
+        for (int tap = 0; tap < hrtf.filterLength; tap++)
+        {
+            const float sourcePosition = static_cast<float>(tap) / sampleRateRatio;
+            const auto lower = std::min<std::size_t>(
+                static_cast<std::size_t>(sourcePosition),
+                AppleHrtf::kTapCount - 1);
+            const auto upper = std::min(lower + 1, AppleHrtf::kTapCount - 1);
+            const float interpFraction = sourcePosition - static_cast<float>(lower);
+            const float value = earGain *
+                (appleFilter.coefficients[ear][lower] * (1.0f - interpFraction) +
+                    appleFilter.coefficients[ear][upper] * interpFraction) / sampleRateRatio;
+
+            const auto destinationIndex = static_cast<std::size_t>(tap) + integerDelay;
+            if (destinationIndex + 1 >= HrtfProfile::kMaxFilterTaps) break;
+            destination[destinationIndex] += value * (1.0f - delayFraction);
+            destination[destinationIndex + 1] += value * delayFraction;
+        }
+        result.tapCount = std::max(result.tapCount,
+            std::min(HrtfProfile::kMaxFilterTaps,
+                static_cast<std::size_t>(hrtf.filterLength) + integerDelay + 1));
+    }
+    return result;
 }
 
 class CombFilter final
@@ -369,6 +383,15 @@ const std::filesystem::path& HrtfProfile::Path() const noexcept
     return impl_->path;
 }
 
+HrtfProfile::Filter HrtfProfile::ComputeFilter(
+    float sampleRate,
+    float azimuthDegrees,
+    float elevationDegrees) const
+{
+    if (impl_ == nullptr || impl_->hrtf == nullptr) return {};
+    return BuildHrtfFilter(*impl_->hrtf, sampleRate, azimuthDegrees, elevationDegrees);
+}
+
 namespace
 {
 struct HrtfSelection final
@@ -393,81 +416,15 @@ struct Spatializer::Impl final
         targetFilters = {};
         targetTapCount = 0;
         const float halfWidth = stageWidth * 0.5f;
-        const float elevation = std::clamp(-pitch, -45.0f, 45.0f) * kPi / 180.0f;
-        const float radius = kMetersPerSofaRadius;
-        const float radiusAtElevation = radius * std::cos(elevation);
+        const float elevationDegrees = std::clamp(-pitch, -45.0f, 45.0f);
 
+        for (std::size_t source = 0; source < 2; source++)
         {
-            std::lock_guard queryLock(hrtf->queryMutex);
-            for (std::size_t source = 0; source < 2; source++)
-            {
-                const float azimuthDegrees = (source == 0 ? halfWidth : -halfWidth) + yaw;
-                const float azimuth = azimuthDegrees * kPi / 180.0f;
-                const float position[3]{
-                    radiusAtElevation * std::cos(azimuth),
-                    radiusAtElevation * std::sin(azimuth),
-                    radius * std::sin(elevation)};
-                std::array<float, kMaximumHrtfTaps> rawLeft{};
-                std::array<float, kMaximumHrtfTaps> rawRight{};
-                float delayLeft = 0.0f;
-                float delayRight = 0.0f;
-                if (hrtf->apple != nullptr)
-                {
-                    const auto appleFilter = hrtf->apple->Interpolate(
-                        azimuthDegrees,
-                        elevation * 180.0f / kPi);
-                    const float sampleRateRatio = sampleRate / kAppleHrtfSampleRate;
-                    for (int tap = 0; tap < hrtf->filterLength; tap++)
-                    {
-                        const float sourcePosition = static_cast<float>(tap) / sampleRateRatio;
-                        const auto lower = std::min<std::size_t>(
-                            static_cast<std::size_t>(sourcePosition),
-                            AppleHrtf::kTapCount - 1);
-                        const auto upper = std::min(lower + 1, AppleHrtf::kTapCount - 1);
-                        const float fraction = sourcePosition - static_cast<float>(lower);
-                        rawLeft[tap] = kAppleHrtfGain *
-                            (appleFilter.coefficients[0][lower] * (1.0f - fraction) +
-                                appleFilter.coefficients[0][upper] * fraction) / sampleRateRatio;
-                        rawRight[tap] = kAppleHrtfGain *
-                            (appleFilter.coefficients[1][lower] * (1.0f - fraction) +
-                                appleFilter.coefficients[1][upper] * fraction) / sampleRateRatio;
-                    }
-                    delayLeft = appleFilter.modelingDelaySamples / kAppleHrtfSampleRate;
-                    delayRight = delayLeft;
-                }
-                else
-                {
-                    mysofa_getfilter_float(
-                        hrtf->easy,
-                        position[0],
-                        position[1],
-                        position[2],
-                        rawLeft.data(),
-                        rawRight.data(),
-                        &delayLeft,
-                        &delayRight);
-                }
-
-                const std::array<const float*, 2> raw{{rawLeft.data(), rawRight.data()}};
-                const std::array<float, 2> delays{{delayLeft, delayRight}};
-                for (std::size_t ear = 0; ear < 2; ear++)
-                {
-                    const std::size_t filter = source * 2 + ear;
-                    const float delaySamples = std::max(0.0f, delays[ear] * sampleRate);
-                    const auto integerDelay = static_cast<std::size_t>(delaySamples);
-                    const float fraction = delaySamples - static_cast<float>(integerDelay);
-                    for (int tap = 0; tap < hrtf->filterLength; tap++)
-                    {
-                        const auto destination = static_cast<std::size_t>(tap) + integerDelay;
-                        if (destination + 1 >= kMaximumHrtfTaps) break;
-                        targetFilters[filter][destination] += raw[ear][tap] * (1.0f - fraction);
-                        targetFilters[filter][destination + 1] += raw[ear][tap] * fraction;
-                    }
-                    targetTapCount = std::max(targetTapCount,
-                        std::min(kMaximumHrtfTaps,
-                            static_cast<std::size_t>(hrtf->filterLength) + integerDelay + 1));
-                }
-            }
+            const float azimuthDegrees = (source == 0 ? halfWidth : -halfWidth) + yaw;
+            const auto filter = BuildHrtfFilter(*hrtf, sampleRate, azimuthDegrees, elevationDegrees);
+            targetFilters[source * 2 + 0] = filter.left;
+            targetFilters[source * 2 + 1] = filter.right;
+            targetTapCount = std::max(targetTapCount, filter.tapCount);
         }
 
         if (!filtersInitialized)
@@ -669,8 +626,7 @@ void Spatializer::Reset()
 
 bool Spatializer::IsHrtfReady() const
 {
-    return impl_->hrtf != nullptr &&
-        (impl_->hrtf->easy != nullptr || impl_->hrtf->apple != nullptr);
+    return impl_->hrtf != nullptr && impl_->hrtf->apple != nullptr;
 }
 
 void Spatializer::Process(

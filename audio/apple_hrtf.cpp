@@ -142,6 +142,22 @@ std::shared_ptr<const AppleHrtf> AppleHrtf::Load(const std::filesystem::path& pa
         }
     }
     if (reader.Offset() != bytes.size()) return {};
+
+    double auxiliarySum = 0.0;
+    std::size_t auxiliaryCount = 0;
+    for (const auto& filter : hrtf->filters_)
+    {
+        for (const float value : filter.auxiliary)
+        {
+            auxiliarySum += value;
+            auxiliaryCount++;
+        }
+    }
+    if (auxiliaryCount > 0 && auxiliarySum > 0.0)
+    {
+        hrtf->averageAuxiliary_ = static_cast<float>(auxiliarySum / static_cast<double>(auxiliaryCount));
+    }
+
     return hrtf;
 }
 

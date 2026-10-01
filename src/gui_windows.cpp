@@ -41,8 +41,6 @@ constexpr int kStatusId = 1010;
 constexpr int kDynamicLockId = 1011;
 constexpr int kBedLockId = 1012;
 constexpr int kReverseHeadTrackingId = 1013;
-constexpr int kHrtfProfileId = 1014;
-constexpr int kHrtfBrowseId = 1015;
 constexpr int kHrtfBlendId = 1016;
 constexpr int kHrtfBlendValueId = 1017;
 
@@ -53,7 +51,6 @@ struct PlayerWindow
     HWND playButton = nullptr;
     HWND stopButton = nullptr;
     HWND profile = nullptr;
-    HWND hrtfProfile = nullptr;
     HWND hrtfBlend = nullptr;
     HWND widthSlider = nullptr;
     HWND roomSlider = nullptr;
@@ -67,8 +64,6 @@ struct PlayerWindow
     WPARAM activeTrackingProfile = 0;
     MediaPlayer player;
     std::filesystem::path selectedFile;
-    std::vector<std::filesystem::path> hrtfPaths;
-    std::vector<std::shared_ptr<const HrtfProfile>> loadedHrtfProfiles;
     std::atomic_bool stopRequested{false};
     std::atomic_bool trackingStopRequested{false};
     std::thread playbackThread;
@@ -125,121 +120,6 @@ void SetTrackingStatus(PlayerWindow& app, bool calibrated)
     SetStatus(app, calibrated
         ? std::wstring(L"Tracking active: ") + detail + L"."
         : std::wstring(L"Calibrating; ") + detail + L"...");
-}
-
-std::filesystem::path ExecutableDirectory()
-{
-    std::vector<wchar_t> path(32768);
-    const auto length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
-    if (length == 0 || length >= path.size()) return {};
-    return std::filesystem::path(std::wstring(path.data(), length)).parent_path();
-}
-
-void AddHrtfPath(PlayerWindow& app, const std::filesystem::path& path)
-{
-    const auto normalized = path.lexically_normal();
-    const auto found = std::find(app.hrtfPaths.begin(), app.hrtfPaths.end(), normalized);
-    if (found != app.hrtfPaths.end())
-    {
-        SendMessageW(app.hrtfProfile, CB_SETCURSEL,
-            static_cast<WPARAM>(std::distance(app.hrtfPaths.begin(), found)), 0);
-        return;
-    }
-
-    std::wstring profileName = normalized.stem().wstring();
-    constexpr std::wstring_view sadieSuffix = L"_48K_24bit_256tap_FIR_SOFA";
-    if (const auto suffix = profileName.find(sadieSuffix); suffix != std::wstring::npos)
-    {
-        profileName.resize(suffix);
-    }
-    const std::wstring label = normalized.parent_path().filename().wstring() +
-        L" / " + profileName;
-    const auto index = SendMessageW(
-        app.hrtfProfile, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-    if (index == CB_ERR || index == CB_ERRSPACE) return;
-    app.hrtfPaths.push_back(normalized);
-    app.loadedHrtfProfiles.emplace_back();
-    SendMessageW(app.hrtfProfile, CB_SETCURSEL, static_cast<WPARAM>(index), 0);
-}
-
-bool SelectHrtfProfile(PlayerWindow& app, int index)
-{
-    if (index < 0 || static_cast<std::size_t>(index) >= app.hrtfPaths.size()) return false;
-    auto& profile = app.loadedHrtfProfiles[static_cast<std::size_t>(index)];
-    if (!profile)
-    {
-        profile = HrtfProfile::Load(app.hrtfPaths[static_cast<std::size_t>(index)]);
-    }
-    if (!profile)
-    {
-        MessageBoxW(app.window,
-            L"This SOFA file is not a supported HRTF profile.",
-            L"HRTF profile",
-            MB_OK | MB_ICONWARNING);
-        return false;
-    }
-
-    app.player.SetHrtfProfile(profile);
-    SetStatus(app, std::wstring(L"HRTF switched: ") +
-        app.hrtfPaths[static_cast<std::size_t>(index)].filename().wstring());
-    return true;
-}
-
-void PopulateHrtfProfiles(PlayerWindow& app)
-{
-    const auto assetDirectory = ExecutableDirectory() / "assets";
-    std::vector<std::filesystem::path> paths;
-    std::error_code error;
-    for (std::filesystem::recursive_directory_iterator iterator(
-             assetDirectory, std::filesystem::directory_options::skip_permission_denied, error),
-         end;
-         iterator != end;
-         iterator.increment(error))
-    {
-        if (error)
-        {
-            error.clear();
-            continue;
-        }
-        if (iterator->is_regular_file(error) && iterator->path().extension() == L".sofa")
-        {
-            paths.push_back(iterator->path());
-        }
-    }
-
-    std::sort(paths.begin(), paths.end());
-    const auto defaultPath = assetDirectory / "MIT_KEMAR_normal_pinna.sofa";
-    const auto defaultProfile = std::find(paths.begin(), paths.end(), defaultPath);
-    if (defaultProfile != paths.end())
-    {
-        std::rotate(paths.begin(), defaultProfile, std::next(defaultProfile));
-    }
-    for (const auto& path : paths)
-    {
-        AddHrtfPath(app, path);
-    }
-    if (!app.hrtfPaths.empty())
-    {
-        SendMessageW(app.hrtfProfile, CB_SETCURSEL, 0, 0);
-        SelectHrtfProfile(app, 0);
-    }
-}
-
-void BrowseForHrtfProfile(PlayerWindow& app)
-{
-    wchar_t path[MAX_PATH * 4]{};
-    OPENFILENAMEW dialog{};
-    dialog.lStructSize = sizeof(dialog);
-    dialog.hwndOwner = app.window;
-    dialog.lpstrFilter = L"SOFA HRTF profiles\0*.sofa\0All files\0*.*\0";
-    dialog.lpstrFile = path;
-    dialog.nMaxFile = static_cast<DWORD>(std::size(path));
-    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-    dialog.lpstrTitle = L"Select an HRTF profile";
-    if (!GetOpenFileNameW(&dialog)) return;
-
-    AddHrtfPath(app, path);
-    SelectHrtfProfile(app, static_cast<int>(SendMessageW(app.hrtfProfile, CB_GETCURSEL, 0, 0)));
 }
 
 HWND AddControl(
@@ -304,27 +184,7 @@ void CreateControls(PlayerWindow& app)
     SendMessageW(app.profile, CB_SETCURSEL, 0, 0);
 
     AddControl(app.window, L"STATIC", L"HRTF profile", SS_LEFT, 400, 247, 160, 24);
-    app.hrtfProfile = AddControl(
-        app.window,
-        WC_COMBOBOXW,
-        L"",
-        CBS_DROPDOWNLIST | WS_TABSTOP | WS_VSCROLL,
-        400,
-        274,
-        210,
-        180,
-        kHrtfProfileId);
-    AddControl(
-        app.window,
-        L"BUTTON",
-        L"Browse...",
-        BS_PUSHBUTTON | WS_TABSTOP,
-        618,
-        274,
-        102,
-        32,
-        kHrtfBrowseId);
-    PopulateHrtfProfiles(app);
+    AddControl(app.window, L"STATIC", L"Apple Generic HRTF (built-in)", SS_LEFT, 400, 274, 320, 24);
     SetStatus(app, L"Choose a file to begin.");
 
     AddControl(app.window, L"STATIC", L"HRTF blend", SS_LEFT, 400, 318, 160, 24);
@@ -566,17 +426,6 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
         {
         case kBrowseId:
             BrowseForFile(*app);
-            return 0;
-        case kHrtfBrowseId:
-            BrowseForHrtfProfile(*app);
-            return 0;
-        case kHrtfProfileId:
-            if (HIWORD(wParam) == CBN_SELCHANGE)
-            {
-                SelectHrtfProfile(
-                    *app,
-                    static_cast<int>(SendMessageW(app->hrtfProfile, CB_GETCURSEL, 0, 0)));
-            }
             return 0;
         case kPlayId:
             StartPlayback(*app);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <filesystem>
 #include <memory>
@@ -23,11 +24,25 @@ struct Pose
 class HrtfProfile final
 {
 public:
+    static constexpr std::size_t kMaxFilterTaps = 1024;
+
+    struct Filter final
+    {
+        std::array<float, kMaxFilterTaps> left{};
+        std::array<float, kMaxFilterTaps> right{};
+        std::size_t tapCount = 0;
+    };
+
     static std::shared_ptr<const HrtfProfile> Load(
         const std::filesystem::path& path,
         float sampleRate = 48000.0f);
 
     const std::filesystem::path& Path() const noexcept;
+
+    // Builds a combined left/right FIR filter (including the modeled propagation
+    // delay) for a single source at the given azimuth/elevation, resampled to
+    // sampleRate. Used by both the stereo Spatializer and per-object Atmos panning.
+    Filter ComputeFilter(float sampleRate, float azimuthDegrees, float elevationDegrees) const;
 
 private:
     struct Impl;

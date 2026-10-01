@@ -27,9 +27,9 @@ int main(int argc, char** argv)
 
     Spatializer spatializer;
     assert(spatializer.IsHrtfReady());
-    const auto largePinnaProfile = HrtfProfile::Load(
-        std::filesystem::path(MAGIC_AAP_TEST_ASSET_DIR) / "MIT_KEMAR_large_pinna.sofa");
-    assert(largePinnaProfile != nullptr);
+    const auto appleProfile = HrtfProfile::Load(
+        std::filesystem::path(MAGIC_AAP_TEST_ASSET_DIR) / "Apple_Generic_HRTF.bin");
+    assert(appleProfile != nullptr);
     spatializer.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
     assert(outputLeft == inputLeft);
     assert(outputRight == inputRight);
@@ -96,7 +96,7 @@ int main(int argc, char** argv)
     liveSwitch.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
     unchangedProfile.Process(
         inputLeft.data(), inputRight.data(), unchangedLeft.data(), unchangedRight.data(), frameCount);
-    liveSwitch.SetHrtfProfile(largePinnaProfile);
+    liveSwitch.SetHrtfProfile(appleProfile);
     for (int block = 0; block < 8; block++)
     {
         liveSwitch.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
@@ -108,13 +108,15 @@ int main(int argc, char** argv)
             assert(std::isfinite(outputRight[index]));
         }
     }
-    bool profileChangedSound = false;
+    // Both spatializers now use the same bundled Apple profile, so a hot-swap should
+    // converge back to matching the never-swapped instance rather than diverging.
+    bool profileSwapConverged = true;
     for (std::size_t index = 0; index < frameCount; index++)
     {
-        profileChangedSound = profileChangedSound ||
-            std::abs(outputLeft[index] - unchangedLeft[index]) > 0.001f;
+        profileSwapConverged = profileSwapConverged &&
+            std::abs(outputLeft[index] - unchangedLeft[index]) < 0.01f;
     }
-    assert(profileChangedSound);
+    assert(profileSwapConverged);
 
     const auto sideEnergy = [](float yawDegrees)
     {
@@ -190,7 +192,7 @@ int main(int argc, char** argv)
         std::size_t unsupportedProfiles = 0;
         for (const auto& entry : std::filesystem::recursive_directory_iterator(argv[1]))
         {
-            if (!entry.is_regular_file() || entry.path().extension() != ".sofa") continue;
+            if (!entry.is_regular_file() || entry.path().extension() != ".bin") continue;
             if (!HrtfProfile::Load(entry.path()))
             {
                 std::cerr << "Unsupported HRTF profile: " << entry.path().string() << '\n';

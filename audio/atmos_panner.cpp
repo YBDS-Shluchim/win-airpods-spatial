@@ -36,6 +36,17 @@ void AtmosPanner::SetSettings(AtmosPannerSettings settings)
     settings_ = settings;
 }
 
+void AtmosPanner::SetSampleRate(float sampleRate)
+{
+    sampleRate_ = std::isfinite(sampleRate) ? std::clamp(sampleRate, 8000.0f, 192000.0f) : 48000.0f;
+}
+
+void AtmosPanner::SetHrtfProfile(std::shared_ptr<const HrtfProfile> profile)
+{
+    hrtfProfile_ = std::move(profile);
+    voices_.clear();
+}
+
 void AtmosPanner::Process(
     const CavernObjectBlock& block,
     float listenerYawDegrees,
@@ -51,15 +62,20 @@ void AtmosPanner::Process(
     }
     std::fill_n(outputLeft, block.frameCount, 0.0f);
     std::fill_n(outputRight, block.frameCount, 0.0f);
+    if (voices_.size() != block.objects.size()) voices_.resize(block.objects.size());
 
     const float yaw = std::isfinite(listenerYawDegrees) ? listenerYawDegrees : 0.0f;
     const float pitch = std::isfinite(listenerPitchDegrees) ? listenerPitchDegrees : 0.0f;
     const float pitchRadians = pitch * kRadiansPerDegree;
     const float cosPitch = std::cos(pitchRadians);
     const float sinPitch = std::sin(pitchRadians);
+    // ~20ms time constant, matching the stereo Spatializer's filter-change smoothing.
+    const float blendSmoothing = 1.0f -
+        std::exp(-static_cast<float>(block.frameCount) / sampleRate_ / 0.020f);
 
-    for (const auto& object : block.objects)
+    for (std::size_t objectIndex = 0; objectIndex < block.objects.size(); objectIndex++)
     {
+        const auto& object = block.objects[objectIndex];
         const auto lockMode = object.isDynamic ? settings_.dynamicObjects : settings_.bed;
         if (object.isLfe)
         {
@@ -95,9 +111,58 @@ void AtmosPanner::Process(
         const float rotatedY = y * cosPitch - rotatedZ * sinPitch;
         const float depth = std::max(0.25f, std::sqrt(rotatedX * rotatedX + rotatedY * rotatedY + rotatedZ * rotatedZ));
         const float azimuth = std::atan2(rotatedX, std::max(0.001f, rotatedZ));
+        const float distanceGain = 1.0f / (1.0f + 0.12f * std::max(0.0f, depth - 1.0f));
+
+        if (hrtfProfile_ != nullptr)
+        {
+            const float azimuthDegrees = azimuth / kRadiansPerDegree;
+            const float elevationDegrees =
+                std::asin(std::clamp(rotatedY / depth, -1.0f, 1.0f)) / kRadiansPerDegree;
+            auto& voice = voices_[objectIndex];
+            voice.targetFilter = hrtfProfile_->ComputeFilter(sampleRate_, azimuthDegrees, elevationDegrees);
+            if (!voice.initialized)
+            {
+                voice.currentFilter = voice.targetFilter;
+                voice.initialized = true;
+            }
+            else
+            {
+                for (std::size_t tap = 0; tap < HrtfProfile::kMaxFilterTaps; tap++)
+                {
+                    voice.currentFilter.left[tap] +=
+                        blendSmoothing * (voice.targetFilter.left[tap] - voice.currentFilter.left[tap]);
+                    voice.currentFilter.right[tap] +=
+                        blendSmoothing * (voice.targetFilter.right[tap] - voice.currentFilter.right[tap]);
+                }
+            }
+            const std::size_t tapCount = std::max(voice.currentFilter.tapCount, voice.targetFilter.tapCount);
+
+            for (int frame = 0; frame < block.frameCount &&
+                static_cast<std::size_t>(frame) < object.samples.size(); frame++)
+            {
+                voice.history[voice.historyIndex] =
+                    object.samples[static_cast<std::size_t>(frame)] * distanceGain;
+                float spatialLeft = 0.0f;
+                float spatialRight = 0.0f;
+                std::size_t historyPosition = voice.historyIndex;
+                for (std::size_t tap = 0; tap < tapCount; tap++)
+                {
+                    const float sample = voice.history[historyPosition];
+                    spatialLeft += sample * voice.currentFilter.left[tap];
+                    spatialRight += sample * voice.currentFilter.right[tap];
+                    historyPosition = historyPosition == 0
+                        ? HrtfProfile::kMaxFilterTaps - 1
+                        : historyPosition - 1;
+                }
+                outputLeft[frame] += spatialLeft;
+                outputRight[frame] += spatialRight;
+                voice.historyIndex = (voice.historyIndex + 1) % HrtfProfile::kMaxFilterTaps;
+            }
+            continue;
+        }
+
         const float side = std::sin(azimuth);
         const float elevation = std::clamp(rotatedY / depth, -1.0f, 1.0f);
-        const float distanceGain = 1.0f / (1.0f + 0.12f * std::max(0.0f, depth - 1.0f));
         const float elevationGain = 1.0f - std::abs(elevation) * 0.06f;
         const float leftGain = std::sqrt(std::clamp(0.5f * (1.0f - side), 0.0f, 1.0f)) * distanceGain * elevationGain;
         const float rightGain = std::sqrt(std::clamp(0.5f * (1.0f + side), 0.0f, 1.0f)) * distanceGain * elevationGain;

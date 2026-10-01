@@ -106,6 +106,9 @@ public:
                 return MA_FORMAT_NOT_SUPPORTED;
             }
             playbackSampleRate_ = static_cast<ma_uint32>(cavernStream_->SampleRate());
+            atmosPanner_.SetSampleRate(static_cast<float>(cavernStream_->SampleRate()));
+            atmosPanner_.SetHrtfProfile(hrtfProfile_.load(std::memory_order_relaxed));
+            activeHrtfProfile_ = hrtfProfile_.load(std::memory_order_relaxed);
             if (!cavernStream_->ReadBlock(currentObjectBlock_, std::chrono::seconds(5)))
             {
                 return MA_NO_DATA_AVAILABLE;
@@ -307,6 +310,12 @@ private:
                 {
                     if (cavernStream_->IsFinished()) finished_.store(true, std::memory_order_relaxed);
                     break;
+                }
+                auto selectedProfile = hrtfProfile_.load(std::memory_order_relaxed);
+                if (selectedProfile != activeHrtfProfile_)
+                {
+                    atmosPanner_.SetHrtfProfile(selectedProfile);
+                    activeHrtfProfile_ = std::move(selectedProfile);
                 }
                 atmosPanner_.Process(
                     currentObjectBlock_,

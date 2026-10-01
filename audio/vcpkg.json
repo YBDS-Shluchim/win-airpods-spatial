@@ -11,7 +11,6 @@
         "avformat",
         "swresample"
       ]
-    },
-    "libmysofa"
+    }
   ]
 }

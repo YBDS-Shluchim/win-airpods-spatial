@@ -3,22 +3,10 @@ project(MagicAapSpatial LANGUAGES CXX)
 
 include(FetchContent)
 find_package(FFMPEG QUIET)
-find_package(mysofa CONFIG REQUIRED)
-if(TARGET mysofa::mysofa-static)
-	set(MYSOFA_TARGET mysofa::mysofa-static)
-else()
-	set(MYSOFA_TARGET mysofa::mysofa-shared)
-endif()
 
 function(stage_hrtf_assets target)
 	add_custom_command(TARGET ${target} POST_BUILD
 		COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${target}>/assets"
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-			"${CMAKE_CURRENT_SOURCE_DIR}/assets/MIT_KEMAR_normal_pinna.sofa"
-			"$<TARGET_FILE_DIR:${target}>/assets/MIT_KEMAR_normal_pinna.sofa"
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different
-			"${CMAKE_CURRENT_SOURCE_DIR}/assets/MIT_KEMAR_large_pinna.sofa"
-			"$<TARGET_FILE_DIR:${target}>/assets/MIT_KEMAR_large_pinna.sofa"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			"${CMAKE_CURRENT_SOURCE_DIR}/assets/Apple_Generic_HRTF.bin"
 			"$<TARGET_FILE_DIR:${target}>/assets/Apple_Generic_HRTF.bin"
@@ -26,17 +14,6 @@ function(stage_hrtf_assets target)
 			"${CMAKE_CURRENT_SOURCE_DIR}/assets/THIRD_PARTY_NOTICES.md"
 			"$<TARGET_FILE_DIR:${target}>/assets/THIRD_PARTY_NOTICES.md"
 		VERBATIM)
-	if(ARGC GREATER 1 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/hrtf-local")
-		foreach(dataset CIPIC SADIE)
-			if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/hrtf-local/${dataset}")
-				add_custom_command(TARGET ${target} POST_BUILD
-					COMMAND ${CMAKE_COMMAND} -E copy_directory
-						"${CMAKE_CURRENT_SOURCE_DIR}/assets/hrtf-local/${dataset}"
-						"$<TARGET_FILE_DIR:${target}>/assets/hrtf/${dataset}"
-					VERBATIM)
-			endif()
-		endforeach()
-	endif()
 endfunction()
 
 FetchContent_Declare(miniaudio_source
@@ -49,7 +26,6 @@ FetchContent_MakeAvailable(miniaudio_source)
 add_library(magic_aap_spatial_dsp spatializer.cpp apple_hrtf.cpp)
 target_compile_features(magic_aap_spatial_dsp PUBLIC cxx_std_20)
 target_include_directories(magic_aap_spatial_dsp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(magic_aap_spatial_dsp PUBLIC ${MYSOFA_TARGET})
 
 add_library(magic_aap_spatial_core ../src/core.cpp)
 target_compile_features(magic_aap_spatial_core PUBLIC cxx_std_20)
@@ -58,6 +34,7 @@ target_include_directories(magic_aap_spatial_core PUBLIC ${CMAKE_CURRENT_SOURCE_
 add_library(magic_aap_spatial_atmos cavern_object_stream.cpp atmos_panner.cpp)
 target_compile_features(magic_aap_spatial_atmos PUBLIC cxx_std_20)
 target_include_directories(magic_aap_spatial_atmos PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(magic_aap_spatial_atmos PUBLIC magic_aap_spatial_dsp)
 
 add_executable(magic_aap_spatial_smoke smoke.cpp)
 target_link_libraries(magic_aap_spatial_smoke PRIVATE magic_aap_spatial_dsp)
