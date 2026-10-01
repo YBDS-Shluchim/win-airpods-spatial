@@ -34,9 +34,10 @@ constexpr const char* kAppleHrtfFilename = "Apple_Generic_HRTF.bin";
 // the raw HRTF.bin grid predates the newer self-describing IR container that embeds
 // SampleRate explicitly, so this remains an inferred (not decoded) constant.
 constexpr float kAppleHrtfSampleRate = 44100.0f;
-// Overall makeup gain, calibrated so the dataset-average per-ear "auxiliary" scalar
-// (see AppleHrtf::AverageAuxiliary) produces roughly the same loudness this constant
-// alone used to produce. The per-position/per-ear variation now comes from the file.
+// Flat calibration gain. The per-ear "auxiliary" scalar in the HRTF data was tried as a
+// per-position multiplier but measurably dropped loudness at typical listening angles
+// (its meaning isn't confirmed - see AppleHrtf::AverageAuxiliary), so it's left unused
+// for now in favor of this known-good flat level.
 constexpr float kAppleHrtfGain = 5.0f;
 
 float WrapDegrees(float value)
@@ -154,10 +155,6 @@ HrtfProfile::Filter BuildHrtfFilter(
     std::lock_guard queryLock(hrtf.queryMutex);
     const auto appleFilter = hrtf.apple->Interpolate(azimuthDegrees, elevationDegrees);
     const float sampleRateRatio = sampleRate / kAppleHrtfSampleRate;
-    const float averageAuxiliary = hrtf.apple->AverageAuxiliary();
-    const float auxiliaryGain = averageAuxiliary > 1e-6f
-        ? kAppleHrtfGain / averageAuxiliary
-        : kAppleHrtfGain;
     const float delaySeconds = appleFilter.modelingDelaySamples / kAppleHrtfSampleRate;
     const float delaySamples = std::max(0.0f, delaySeconds * sampleRate);
     const auto integerDelay = static_cast<std::size_t>(delaySamples);
@@ -166,7 +163,6 @@ HrtfProfile::Filter BuildHrtfFilter(
     for (std::size_t ear = 0; ear < 2; ear++)
     {
         auto& destination = ear == 0 ? result.left : result.right;
-        const float earGain = auxiliaryGain * appleFilter.auxiliary[ear];
         for (int tap = 0; tap < hrtf.filterLength; tap++)
         {
             const float sourcePosition = static_cast<float>(tap) / sampleRateRatio;
@@ -175,7 +171,7 @@ HrtfProfile::Filter BuildHrtfFilter(
                 AppleHrtf::kTapCount - 1);
             const auto upper = std::min(lower + 1, AppleHrtf::kTapCount - 1);
             const float interpFraction = sourcePosition - static_cast<float>(lower);
-            const float value = earGain *
+            const float value = kAppleHrtfGain *
                 (appleFilter.coefficients[ear][lower] * (1.0f - interpFraction) +
                     appleFilter.coefficients[ear][upper] * interpFraction) / sampleRateRatio;
 
