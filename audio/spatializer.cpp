@@ -135,7 +135,7 @@ std::shared_ptr<SharedHrtf> OpenSharedHrtf(
 
     int filterLength = 0;
     int errorCode = 0;
-    auto* easy = mysofa_open_data(
+    auto* easy = mysofa_open_data_no_norm(
         data.data(), static_cast<long>(data.size()), sampleRate, &filterLength, &errorCode);
     if (easy == nullptr || filterLength <= 0 ||
         filterLength > static_cast<int>(kMaximumHrtfTaps - 64))
