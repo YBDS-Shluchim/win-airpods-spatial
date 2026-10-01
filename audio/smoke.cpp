@@ -81,6 +81,42 @@ int main()
     }
     assert(poseChanged);
 
+    const auto sideEnergy = [](float yawDegrees)
+    {
+        Spatializer renderer;
+        renderer.SetMode(Mode::Tracked);
+        renderer.SetStageWidth(68.0f);
+        renderer.SetRoomReflection(0.0f);
+        std::array<float, frameCount> monoInput{};
+        std::array<float, frameCount> renderedLeft{};
+        std::array<float, frameCount> renderedRight{};
+        for (std::size_t index = 0; index < frameCount; index++)
+        {
+            monoInput[index] = 0.2f * std::sin(static_cast<float>(index) * 0.071f);
+        }
+
+        double leftEnergy = 0.0;
+        double rightEnergy = 0.0;
+        for (int block = 0; block < 12; block++)
+        {
+            renderer.SetPose(Pose{yawDegrees, 0.0f, 0.0f});
+            renderer.Process(
+                monoInput.data(), monoInput.data(),
+                renderedLeft.data(), renderedRight.data(), frameCount);
+            if (block < 4) continue;
+            for (std::size_t index = 0; index < frameCount; index++)
+            {
+                leftEnergy += renderedLeft[index] * renderedLeft[index];
+                rightEnergy += renderedRight[index] * renderedRight[index];
+            }
+        }
+        return leftEnergy - rightEnergy;
+    };
+
+    const double leftTurnSideEnergy = sideEnergy(-60.0f);
+    const double rightTurnSideEnergy = sideEnergy(60.0f);
+    assert(leftTurnSideEnergy * rightTurnSideEnergy < 0.0);
+
     Spatializer dryRoom;
     Spatializer wetRoom;
     dryRoom.SetMode(Mode::Fixed);

@@ -66,6 +66,10 @@ jobs:
           Copy-Item "build/Release/MagicAapSpatialPlayer.exe" $stage
           Copy-Item "build/AtmosDecoder/AtmosDecoder.exe" $stage
           Copy-Item "README.md" $stage
+          $assets = Join-Path $stage "assets"
+          New-Item -ItemType Directory -Force -Path $assets | Out-Null
+          Copy-Item "audio/assets/MIT_KEMAR_normal_pinna.sofa" $assets
+          Copy-Item "audio/assets/THIRD_PARTY_NOTICES.md" $assets
           Copy-Item "build/_deps/miniaudio_source-src/LICENSE" (Join-Path $stage "miniaudio-LICENSE")
           Copy-Item "build/vcpkg_installed/x64-windows-static-md-release/share/ffmpeg/copyright" (Join-Path $stage "ffmpeg-LICENSE")
           Copy-Item "$env:USERPROFILE/.nuget/packages/cavern.format/2.1.0/LICENCE.md" (Join-Path $stage "Cavern-Format-LICENSE")
