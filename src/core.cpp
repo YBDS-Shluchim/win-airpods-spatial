@@ -391,7 +391,7 @@ std::optional<PoseResult> PoseEstimator::ProcessPacket(std::span<const std::uint
     {
         const auto delta = Normalize(Multiply(Conjugate(*smoothed_), relative));
         const double angle = 2.0 * std::acos(std::clamp(std::abs(delta[3]), 0.0, 1.0)) * kRadiansToDegrees;
-        const double amount = std::clamp(0.12 + angle * 0.018, 0.12, 0.42);
+        const double amount = std::clamp(0.35 + angle * 0.025, 0.35, 0.80);
         smoothed_ = Slerp(*smoothed_, relative, amount);
     }
 

@@ -53,6 +53,7 @@ struct PlayerWindow
     HWND bedLock = nullptr;
     HWND reverseHeadTracking = nullptr;
     HWND status = nullptr;
+    WPARAM activeTrackingProfile = 0;
     MediaPlayer player;
     std::filesystem::path selectedFile;
     std::atomic_bool stopRequested{false};
@@ -79,6 +80,38 @@ struct PlayerWindow
 void SetStatus(PlayerWindow& app, const std::wstring& text)
 {
     SetWindowTextW(app.status, text.c_str());
+}
+
+void SetTrackingStatus(PlayerWindow& app, bool calibrated)
+{
+    const wchar_t* profile = nullptr;
+    const wchar_t* rate = nullptr;
+    switch (app.activeTrackingProfile)
+    {
+    case 4:
+        profile = L"alternate";
+        rate = L"25";
+        break;
+    case 5:
+        profile = L"devmotion6";
+        rate = L"50";
+        break;
+    case 6:
+        profile = L"max2";
+        rate = L"50";
+        break;
+    }
+
+    if (profile == nullptr)
+    {
+        SetStatus(app, calibrated ? L"Head tracking active." : L"Calibrating head pose; hold still...");
+        return;
+    }
+
+    const std::wstring detail = std::wstring(profile) + L" (" + rate + L" Hz requested)";
+    SetStatus(app, calibrated
+        ? std::wstring(L"Tracking active: ") + detail + L"."
+        : std::wstring(L"Calibrating; ") + detail + L"...");
 }
 
 HWND AddControl(
@@ -245,6 +278,7 @@ void StartPlayback(PlayerWindow& app)
             : ObjectLockMode::Diffuse;
     app.stopRequested.store(false, std::memory_order_relaxed);
     app.trackingStopRequested.store(false, std::memory_order_relaxed);
+    app.activeTrackingProfile = 0;
     app.player.SetHeadPose(0.0f, 0.0f);
     app.isPlaying = true;
     EnableWindow(app.playButton, FALSE);
@@ -293,6 +327,18 @@ void StartPlayback(PlayerWindow& app)
                         if (status.starts_with("Detecting"))
                         {
                             PostMessageW(app.window, kTrackingStatusChanged, 0, 0);
+                        }
+                        else if (status.starts_with("Tracking active: alternate"))
+                        {
+                            PostMessageW(app.window, kTrackingStatusChanged, 4, 0);
+                        }
+                        else if (status.starts_with("Tracking active: devmotion6"))
+                        {
+                            PostMessageW(app.window, kTrackingStatusChanged, 5, 0);
+                        }
+                        else if (status.starts_with("Tracking active: max2"))
+                        {
+                            PostMessageW(app.window, kTrackingStatusChanged, 6, 0);
                         }
                     });
             }
@@ -383,8 +429,12 @@ LRESULT CALLBACK WindowProcedure(HWND window, UINT message, WPARAM wParam, LPARA
         return 0;
     case kTrackingStatusChanged:
         if (wParam == 0) SetStatus(*app, L"Detecting head-tracking protocol...");
-        else if (wParam == 1) SetStatus(*app, L"Calibrating head pose; hold still...");
-        else if (wParam == 2) SetStatus(*app, L"Head tracking active.");
+        else if (wParam == 1 || wParam == 2) SetTrackingStatus(*app, wParam == 2);
+        else if (wParam >= 4 && wParam <= 6)
+        {
+            app->activeTrackingProfile = wParam;
+            SetTrackingStatus(*app, false);
+        }
         else SetStatus(*app, L"Head tracking unavailable; audio will remain centered.");
         return 0;
     case WM_CLOSE:

@@ -99,7 +99,7 @@ void Spatializer::Process(
         ? requestedPitch_.load(std::memory_order_relaxed)
         : 0.0f;
     const float blockSeconds = static_cast<float>(frameCount) / sampleRate_;
-    const float smoothing = 1.0f - std::exp(-blockSeconds / 0.055f);
+    const float smoothing = 1.0f - std::exp(-blockSeconds / 0.020f);
     smoothedYaw_ += WrapDegrees(targetYaw - smoothedYaw_) * smoothing;
     smoothedPitch_ += (targetPitch - smoothedPitch_) * smoothing;
 
