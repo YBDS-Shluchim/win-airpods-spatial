@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <filesystem>
+#include <memory>
 
 namespace MagicAapSpatial
 {
@@ -30,6 +31,7 @@ class MediaPlayer final
 {
 public:
     void SetHeadPose(float yawDegrees, float pitchDegrees);
+    void SetHrtfProfile(std::shared_ptr<const HrtfProfile> profile);
 
     int PlayFile(
         const std::filesystem::path& path,
@@ -39,5 +41,6 @@ public:
 private:
     std::atomic<float> yawDegrees_{0.0f};
     std::atomic<float> pitchDegrees_{0.0f};
+    std::atomic<std::shared_ptr<const HrtfProfile>> hrtfProfile_{};
 };
 }

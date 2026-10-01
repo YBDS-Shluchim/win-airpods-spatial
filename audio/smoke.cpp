@@ -3,12 +3,15 @@
 #include <array>
 #include <cassert>
 #include <cmath>
+#include <filesystem>
+#include <iostream>
 
 using MagicAapSpatial::Mode;
+using MagicAapSpatial::HrtfProfile;
 using MagicAapSpatial::Pose;
 using MagicAapSpatial::Spatializer;
 
-int main()
+int main(int argc, char** argv)
 {
     constexpr std::size_t frameCount = 512;
     std::array<float, frameCount> inputLeft{};
@@ -24,6 +27,9 @@ int main()
 
     Spatializer spatializer;
     assert(spatializer.IsHrtfReady());
+    const auto largePinnaProfile = HrtfProfile::Load(
+        std::filesystem::path(MAGIC_AAP_TEST_ASSET_DIR) / "MIT_KEMAR_large_pinna.sofa");
+    assert(largePinnaProfile != nullptr);
     spatializer.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
     assert(outputLeft == inputLeft);
     assert(outputRight == inputRight);
@@ -80,6 +86,35 @@ int main()
         poseChanged = poseChanged || std::abs(turnedLeft[index] - centeredLeft[index]) > 0.001f;
     }
     assert(poseChanged);
+
+    Spatializer liveSwitch;
+    Spatializer unchangedProfile;
+    liveSwitch.SetMode(Mode::Fixed);
+    unchangedProfile.SetMode(Mode::Fixed);
+    std::array<float, frameCount> unchangedLeft{};
+    std::array<float, frameCount> unchangedRight{};
+    liveSwitch.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
+    unchangedProfile.Process(
+        inputLeft.data(), inputRight.data(), unchangedLeft.data(), unchangedRight.data(), frameCount);
+    liveSwitch.SetHrtfProfile(largePinnaProfile);
+    for (int block = 0; block < 8; block++)
+    {
+        liveSwitch.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
+        unchangedProfile.Process(
+            inputLeft.data(), inputRight.data(), unchangedLeft.data(), unchangedRight.data(), frameCount);
+        for (std::size_t index = 0; index < frameCount; index++)
+        {
+            assert(std::isfinite(outputLeft[index]));
+            assert(std::isfinite(outputRight[index]));
+        }
+    }
+    bool profileChangedSound = false;
+    for (std::size_t index = 0; index < frameCount; index++)
+    {
+        profileChangedSound = profileChangedSound ||
+            std::abs(outputLeft[index] - unchangedLeft[index]) > 0.001f;
+    }
+    assert(profileChangedSound);
 
     const auto sideEnergy = [](float yawDegrees)
     {
@@ -140,5 +175,25 @@ int main()
     spatializer.Process(inputLeft.data(), inputRight.data(), outputLeft.data(), outputRight.data(), frameCount);
     assert(outputLeft == inputLeft);
     assert(outputRight == inputRight);
+
+    if (argc > 1)
+    {
+        std::size_t loadedProfiles = 0;
+        std::size_t unsupportedProfiles = 0;
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(argv[1]))
+        {
+            if (!entry.is_regular_file() || entry.path().extension() != ".sofa") continue;
+            if (!HrtfProfile::Load(entry.path()))
+            {
+                std::cerr << "Unsupported HRTF profile: " << entry.path().string() << '\n';
+                unsupportedProfiles++;
+                continue;
+            }
+            loadedProfiles++;
+        }
+        std::cout << "Loaded " << loadedProfiles << " HRTF profiles; "
+                  << unsupportedProfiles << " unsupported files.\n";
+        if (unsupportedProfiles > 0) return 1;
+    }
     return 0;
 }

@@ -1,12 +1,23 @@
 ## MIT KEMAR HRTF dataset
 
-`MIT_KEMAR_normal_pinna.sofa` contains head-related transfer function measurements of a KEMAR dummy head and microphones.
+`MIT_KEMAR_normal_pinna.sofa` and `MIT_KEMAR_large_pinna.sofa` contain head-related transfer function measurements of a KEMAR dummy head and microphones.
 
 Copyright 1994 MIT Media Laboratory. The data is provided free with no restrictions on use, provided the authors are cited when the data is used in research or commercial applications.
 
 Authors: Bill Gardner and Keith Martin, MIT Media Lab Machine Listening Group.
 Original archive: ftp://sound.media.mit.edu/pub/Data/KEMAR
 SOFA conversion: https://github.com/hoene/libmysofa
+
+## CIPIC HRTF database
+
+The CIPIC subject SOFA files are measurements from the Center for Image Processing and Integrated Computing, University of California, Davis.
+
+Copyright (c) 2001 The Regents of the University of California. All Rights Reserved.
+
+The Regents grant permission to reproduce and use these materials for educational, research, or commercial purposes. Each reproduction must include the copyright notice. Published research should acknowledge the CIPIC database; commercial product developers are asked to send written acknowledgment to CIPIC, University of California, Davis.
+
+Source: https://sofacoustics.org/data/database/cipic/
+
 
 ## libmysofa
 

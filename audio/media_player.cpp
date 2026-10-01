@@ -39,7 +39,8 @@ public:
     PlaybackSession(
         PlaybackSettings settings,
         const std::atomic<float>& yawDegrees,
-        const std::atomic<float>& pitchDegrees)
+        const std::atomic<float>& pitchDegrees,
+        const std::atomic<std::shared_ptr<const HrtfProfile>>& hrtfProfile)
         : interleaved_(kCallbackChunkFrames * 4),
           inputLeft_(kCallbackChunkFrames),
           inputRight_(kCallbackChunkFrames),
@@ -53,7 +54,8 @@ public:
                     objectOutputRight_(kCallbackChunkFrames),
           settings_(settings),
           yawDegrees_(yawDegrees),
-          pitchDegrees_(pitchDegrees)
+          pitchDegrees_(pitchDegrees),
+          hrtfProfile_(hrtfProfile)
     {
         const auto mode = settings.mode == PlaybackSpatialMode::Tracked
             ? Mode::Tracked
@@ -239,6 +241,14 @@ private:
                     0.0f});
             }
 
+            auto selectedProfile = hrtfProfile_.load(std::memory_order_relaxed);
+            if (selectedProfile != activeHrtfProfile_)
+            {
+                spatializer_.SetHrtfProfile(selectedProfile);
+                ambienceSpatializer_.SetHrtfProfile(selectedProfile);
+                activeHrtfProfile_ = std::move(selectedProfile);
+            }
+
             spatializer_.Process(
                 inputLeft_.data(),
                 inputRight_.data(),
@@ -346,6 +356,8 @@ private:
     PlaybackSettings settings_;
     const std::atomic<float>& yawDegrees_;
     const std::atomic<float>& pitchDegrees_;
+    const std::atomic<std::shared_ptr<const HrtfProfile>>& hrtfProfile_;
+    std::shared_ptr<const HrtfProfile> activeHrtfProfile_;
     Spatializer spatializer_;
     Spatializer ambienceSpatializer_;
 };
@@ -376,7 +388,7 @@ int MediaPlayer::PlayFile(
     const auto& playbackPath = decodedPath ? *decodedPath : path;
     const auto play = [&]() -> int
     {
-        PlaybackSession session(settings, yawDegrees_, pitchDegrees_);
+        PlaybackSession session(settings, yawDegrees_, pitchDegrees_, hrtfProfile_);
         auto audioResult = session.Initialize(playbackPath);
         if (audioResult != MA_SUCCESS)
         {
@@ -415,5 +427,10 @@ void MediaPlayer::SetHeadPose(float yawDegrees, float pitchDegrees)
 {
     yawDegrees_.store(yawDegrees, std::memory_order_relaxed);
     pitchDegrees_.store(pitchDegrees, std::memory_order_relaxed);
+}
+
+void MediaPlayer::SetHrtfProfile(std::shared_ptr<const HrtfProfile> profile)
+{
+    hrtfProfile_.store(std::move(profile), std::memory_order_relaxed);
 }
 }

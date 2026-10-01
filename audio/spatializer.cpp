@@ -128,7 +128,7 @@ std::shared_ptr<SharedHrtf> OpenSharedHrtf(
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) return {};
     const auto end = file.tellg();
-    if (end <= 0 || end > 16 * 1024 * 1024) return {};
+    if (end <= 0 || end > 128 * 1024 * 1024) return {};
     std::vector<char> data(static_cast<std::size_t>(end));
     file.seekg(0, std::ios::beg);
     if (!file.read(data.data(), static_cast<std::streamsize>(data.size()))) return {};
@@ -318,6 +318,44 @@ private:
 };
 }
 
+struct HrtfProfile::Impl final
+{
+    std::shared_ptr<SharedHrtf> hrtf;
+    std::filesystem::path path;
+};
+
+HrtfProfile::HrtfProfile(std::shared_ptr<Impl> impl)
+    : impl_(std::move(impl))
+{
+}
+
+std::shared_ptr<const HrtfProfile> HrtfProfile::Load(
+    const std::filesystem::path& path,
+    float sampleRate)
+{
+    auto hrtf = OpenSharedHrtf(path, sampleRate);
+    if (hrtf == nullptr) return {};
+
+    auto impl = std::make_shared<Impl>();
+    impl->hrtf = std::move(hrtf);
+    impl->path = path;
+    return std::shared_ptr<const HrtfProfile>(new HrtfProfile(std::move(impl)));
+}
+
+const std::filesystem::path& HrtfProfile::Path() const noexcept
+{
+    return impl_->path;
+}
+
+namespace
+{
+struct HrtfSelection final
+{
+    std::shared_ptr<const HrtfProfile> profile;
+    std::shared_ptr<SharedHrtf> hrtf;
+};
+}
+
 struct Spatializer::Impl final
 {
     explicit Impl(float sampleRate)
@@ -415,6 +453,12 @@ struct Spatializer::Impl final
             return;
         }
 
+        if (auto selection = requestedHrtf.exchange(nullptr, std::memory_order_relaxed))
+        {
+            activeProfile = std::move(selection->profile);
+            hrtf = std::move(selection->hrtf);
+        }
+
         const auto requested = static_cast<Mode>(requestedMode.load(std::memory_order_relaxed));
         if (requested != activeMode || resetRequested.exchange(false, std::memory_order_relaxed))
         {
@@ -484,6 +528,8 @@ struct Spatializer::Impl final
     float sampleRate;
     RoomModel room;
     std::shared_ptr<SharedHrtf> hrtf;
+    std::shared_ptr<const HrtfProfile> activeProfile;
+    std::atomic<std::shared_ptr<const HrtfSelection>> requestedHrtf{};
     std::atomic<int> requestedMode{static_cast<int>(Mode::Off)};
     std::atomic<bool> resetRequested{false};
     std::atomic<float> requestedYaw{0.0f};
@@ -538,6 +584,15 @@ void Spatializer::SetRoomReflection(float amount)
     impl_->requestedRoomReflection.store(
         std::isfinite(amount) ? std::clamp(amount, 0.0f, 0.35f) : 0.08f,
         std::memory_order_relaxed);
+}
+
+void Spatializer::SetHrtfProfile(std::shared_ptr<const HrtfProfile> profile)
+{
+    if (profile == nullptr || profile->impl_ == nullptr || profile->impl_->hrtf == nullptr) return;
+    auto selection = std::make_shared<HrtfSelection>();
+    selection->profile = std::move(profile);
+    selection->hrtf = selection->profile->impl_->hrtf;
+    impl_->requestedHrtf.store(std::move(selection), std::memory_order_relaxed);
 }
 
 void Spatializer::Reset()

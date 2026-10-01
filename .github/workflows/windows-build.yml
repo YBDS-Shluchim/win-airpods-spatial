@@ -69,7 +69,24 @@ jobs:
           $assets = Join-Path $stage "assets"
           New-Item -ItemType Directory -Force -Path $assets | Out-Null
           Copy-Item "audio/assets/MIT_KEMAR_normal_pinna.sofa" $assets
+          Copy-Item "audio/assets/MIT_KEMAR_large_pinna.sofa" $assets
           Copy-Item "audio/assets/THIRD_PARTY_NOTICES.md" $assets
+          $cipic = Join-Path $assets "hrtf/CIPIC"
+          New-Item -ItemType Directory -Force -Path $cipic | Out-Null
+          $cipicIndex = Invoke-WebRequest "https://sofacoustics.org/data/database/cipic/"
+          $cipicFiles = [regex]::Matches($cipicIndex.Content, 'href="(subject_\d+\.sofa)"') |
+            ForEach-Object { $_.Groups[1].Value } |
+            Sort-Object -Unique
+          foreach ($file in $cipicFiles) {
+            Invoke-WebRequest "https://sofacoustics.org/data/database/cipic/$file" -OutFile (Join-Path $cipic $file)
+          }
+          $sadie = Join-Path $assets "hrtf/SADIE"
+          New-Item -ItemType Directory -Force -Path $sadie | Out-Null
+          foreach ($subject in @("D1", "D2", "H3", "H4", "H5", "H6", "H7", "H8", "H9", "H10", "H11", "H12", "H13", "H14", "H15", "H16", "H17", "H18", "H19", "H20")) {
+            $file = "${subject}_48K_24bit_256tap_FIR_SOFA.sofa"
+            Invoke-WebRequest "https://sofacoustics.org/data/database/sadie/$file" -OutFile (Join-Path $sadie $file)
+          }
+          Invoke-WebRequest "https://raw.githubusercontent.com/hoene/libmysofa/main/tests/LICENSE.H20_44K_16bit_256tap_FIR_SOFA" -OutFile (Join-Path $sadie "LICENSE.txt")
           Copy-Item "build/_deps/miniaudio_source-src/LICENSE" (Join-Path $stage "miniaudio-LICENSE")
           Copy-Item "build/vcpkg_installed/x64-windows-static-md-release/share/ffmpeg/copyright" (Join-Path $stage "ffmpeg-LICENSE")
           Copy-Item "$env:USERPROFILE/.nuget/packages/cavern.format/2.1.0/LICENCE.md" (Join-Path $stage "Cavern-Format-LICENSE")

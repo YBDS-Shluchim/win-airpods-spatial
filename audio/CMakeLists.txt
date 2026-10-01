@@ -17,9 +17,23 @@ function(stage_hrtf_assets target)
 			"${CMAKE_CURRENT_SOURCE_DIR}/assets/MIT_KEMAR_normal_pinna.sofa"
 			"$<TARGET_FILE_DIR:${target}>/assets/MIT_KEMAR_normal_pinna.sofa"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_CURRENT_SOURCE_DIR}/assets/MIT_KEMAR_large_pinna.sofa"
+			"$<TARGET_FILE_DIR:${target}>/assets/MIT_KEMAR_large_pinna.sofa"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			"${CMAKE_CURRENT_SOURCE_DIR}/assets/THIRD_PARTY_NOTICES.md"
 			"$<TARGET_FILE_DIR:${target}>/assets/THIRD_PARTY_NOTICES.md"
 		VERBATIM)
+	if(ARGC GREATER 1 AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/hrtf-local")
+		foreach(dataset CIPIC SADIE)
+			if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/assets/hrtf-local/${dataset}")
+				add_custom_command(TARGET ${target} POST_BUILD
+					COMMAND ${CMAKE_COMMAND} -E copy_directory
+						"${CMAKE_CURRENT_SOURCE_DIR}/assets/hrtf-local/${dataset}"
+						"$<TARGET_FILE_DIR:${target}>/assets/hrtf/${dataset}"
+					VERBATIM)
+			endif()
+		endforeach()
+	endif()
 endfunction()
 
 FetchContent_Declare(miniaudio_source
@@ -44,6 +58,8 @@ target_include_directories(magic_aap_spatial_atmos PUBLIC ${CMAKE_CURRENT_SOURCE
 
 add_executable(magic_aap_spatial_smoke smoke.cpp)
 target_link_libraries(magic_aap_spatial_smoke PRIVATE magic_aap_spatial_dsp)
+target_compile_definitions(magic_aap_spatial_smoke PRIVATE
+	MAGIC_AAP_TEST_ASSET_DIR=\"$<TARGET_FILE_DIR:magic_aap_spatial_smoke>/assets\")
 stage_hrtf_assets(magic_aap_spatial_smoke)
 
 add_executable(magic_aap_spatial_core_smoke ../test/core_smoke.cpp)
@@ -55,7 +71,7 @@ target_link_libraries(magic_aap_spatial_atmos_smoke PRIVATE magic_aap_spatial_at
 add_executable(magic-aap-spatial ../src/main.cpp ../src/windows_device.cpp media_player.cpp ffmpeg_channel_decoder.cpp)
 target_link_libraries(magic-aap-spatial PRIVATE magic_aap_spatial_core magic_aap_spatial_dsp magic_aap_spatial_atmos)
 target_include_directories(magic-aap-spatial PRIVATE ${miniaudio_source_SOURCE_DIR})
-stage_hrtf_assets(magic-aap-spatial)
+stage_hrtf_assets(magic-aap-spatial TRUE)
 if(FFMPEG_FOUND)
 	target_compile_definitions(magic-aap-spatial PRIVATE MAGIC_AAP_HAS_FFMPEG)
 	target_include_directories(magic-aap-spatial PRIVATE ${FFMPEG_INCLUDE_DIRS})
@@ -69,7 +85,7 @@ if(WIN32)
 	add_executable(MagicAapSpatialPlayer WIN32 ../src/gui_windows.cpp ../src/head_tracker.cpp ../src/windows_device.cpp media_player.cpp ffmpeg_channel_decoder.cpp)
 	target_link_libraries(MagicAapSpatialPlayer PRIVATE magic_aap_spatial_core magic_aap_spatial_dsp magic_aap_spatial_atmos setupapi comctl32 comdlg32 ole32 winmm avrt uuid)
 	target_include_directories(MagicAapSpatialPlayer PRIVATE ${miniaudio_source_SOURCE_DIR})
-	stage_hrtf_assets(MagicAapSpatialPlayer)
+	stage_hrtf_assets(MagicAapSpatialPlayer TRUE)
 	if(FFMPEG_FOUND)
 		target_compile_definitions(MagicAapSpatialPlayer PRIVATE MAGIC_AAP_HAS_FFMPEG)
 		target_include_directories(MagicAapSpatialPlayer PRIVATE ${FFMPEG_INCLUDE_DIRS})
@@ -83,3 +99,5 @@ enable_testing()
 add_test(NAME spatializer_smoke COMMAND magic_aap_spatial_smoke)
 add_test(NAME core_smoke COMMAND magic_aap_spatial_core_smoke)
 add_test(NAME atmos_panner_smoke COMMAND magic_aap_spatial_atmos_smoke)
+set_tests_properties(spatializer_smoke PROPERTIES
+	WORKING_DIRECTORY "$<TARGET_FILE_DIR:magic_aap_spatial_smoke>")

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <filesystem>
 #include <memory>
 
 namespace MagicAapSpatial
@@ -19,6 +20,23 @@ struct Pose
     float rollDegrees = 0.0f;
 };
 
+class HrtfProfile final
+{
+public:
+    static std::shared_ptr<const HrtfProfile> Load(
+        const std::filesystem::path& path,
+        float sampleRate = 48000.0f);
+
+    const std::filesystem::path& Path() const noexcept;
+
+private:
+    struct Impl;
+    explicit HrtfProfile(std::shared_ptr<Impl> impl);
+    std::shared_ptr<Impl> impl_;
+
+    friend class Spatializer;
+};
+
 class Spatializer final
 {
 public:
@@ -32,6 +50,7 @@ public:
     void SetPose(Pose pose);
     void SetStageWidth(float degrees);
     void SetRoomReflection(float amount);
+    void SetHrtfProfile(std::shared_ptr<const HrtfProfile> profile);
     void Reset();
     bool IsHrtfReady() const;
 

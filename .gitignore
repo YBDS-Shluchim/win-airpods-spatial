@@ -44,6 +44,7 @@
 build/
 Build/
 build-*/
+audio/assets/hrtf-local/
 
 # CMake generated files
 CMakeFiles/
