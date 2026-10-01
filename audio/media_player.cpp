@@ -437,7 +437,7 @@ void MediaPlayer::SetHeadPose(float yawDegrees, float pitchDegrees)
 
 void MediaPlayer::SetHrtfBlend(float amount)
 {
-    hrtfBlend_.store(std::isfinite(amount) ? std::clamp(amount, 0.0f, 1.0f) : 0.85f,
+    hrtfBlend_.store(std::isfinite(amount) ? std::clamp(amount, 0.0f, 1.0f) : 1.0f,
         std::memory_order_relaxed);
 }
 

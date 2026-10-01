@@ -1,4 +1,5 @@
 #include "spatializer.hpp"
+#include "apple_hrtf.hpp"
 
 #include <mysofa.h>
 
@@ -34,6 +35,9 @@ constexpr float kSpatialGain = 0.84f;
 constexpr std::size_t kMaximumHrtfTaps = 1024;
 constexpr float kRoomDecaySeconds = 0.38f;
 constexpr const char* kHrtfFilename = "MIT_KEMAR_normal_pinna.sofa";
+constexpr const char* kAppleHrtfFilename = "Apple_Generic_HRTF.bin";
+constexpr float kAppleHrtfSampleRate = 44100.0f;
+constexpr float kAppleHrtfGain = 5.0f;
 
 float WrapDegrees(float value)
 {
@@ -70,6 +74,8 @@ std::filesystem::path FindHrtfFile()
     const auto workingDirectory = std::filesystem::current_path(error);
     if (!error)
     {
+        candidates.push_back(workingDirectory / "assets" / kAppleHrtfFilename);
+        candidates.push_back(workingDirectory / "audio" / "assets" / kAppleHrtfFilename);
         candidates.push_back(workingDirectory / "assets" / kHrtfFilename);
         candidates.push_back(workingDirectory / "audio" / "assets" / kHrtfFilename);
     }
@@ -77,6 +83,7 @@ std::filesystem::path FindHrtfFile()
     const auto executableDirectory = ExecutableDirectory();
     if (!executableDirectory.empty())
     {
+        candidates.push_back(executableDirectory / "assets" / kAppleHrtfFilename);
         candidates.push_back(executableDirectory / "assets" / kHrtfFilename);
     }
 
@@ -99,6 +106,7 @@ struct SharedHrtf final
     }
 
     MYSOFA_EASY* easy = nullptr;
+    std::shared_ptr<const AppleHrtf> apple;
     int filterLength = 0;
     std::filesystem::path path;
     float sampleRate = 0.0f;
@@ -123,6 +131,20 @@ std::shared_ptr<SharedHrtf> OpenSharedHrtf(
         cached != nullptr && cachedPath == canonicalPath && cachedSampleRate == sampleRate)
     {
         return cached;
+    }
+
+    if (auto apple = AppleHrtf::Load(path))
+    {
+        auto loaded = std::make_shared<SharedHrtf>();
+        loaded->apple = std::move(apple);
+        loaded->filterLength = static_cast<int>(std::ceil(
+            static_cast<float>(AppleHrtf::kTapCount) * sampleRate / kAppleHrtfSampleRate));
+        loaded->path = canonicalPath;
+        loaded->sampleRate = sampleRate;
+        cachedPath = canonicalPath;
+        cachedSampleRate = sampleRate;
+        cachedHrtf = loaded;
+        return loaded;
     }
 
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -389,15 +411,42 @@ struct Spatializer::Impl final
                 std::array<float, kMaximumHrtfTaps> rawRight{};
                 float delayLeft = 0.0f;
                 float delayRight = 0.0f;
-                mysofa_getfilter_float(
-                    hrtf->easy,
-                    position[0],
-                    position[1],
-                    position[2],
-                    rawLeft.data(),
-                    rawRight.data(),
-                    &delayLeft,
-                    &delayRight);
+                if (hrtf->apple != nullptr)
+                {
+                    const auto appleFilter = hrtf->apple->Interpolate(
+                        azimuthDegrees,
+                        elevation * 180.0f / kPi);
+                    const float sampleRateRatio = sampleRate / kAppleHrtfSampleRate;
+                    for (int tap = 0; tap < hrtf->filterLength; tap++)
+                    {
+                        const float sourcePosition = static_cast<float>(tap) / sampleRateRatio;
+                        const auto lower = std::min<std::size_t>(
+                            static_cast<std::size_t>(sourcePosition),
+                            AppleHrtf::kTapCount - 1);
+                        const auto upper = std::min(lower + 1, AppleHrtf::kTapCount - 1);
+                        const float fraction = sourcePosition - static_cast<float>(lower);
+                        rawLeft[tap] = kAppleHrtfGain *
+                            (appleFilter.coefficients[0][lower] * (1.0f - fraction) +
+                                appleFilter.coefficients[0][upper] * fraction) / sampleRateRatio;
+                        rawRight[tap] = kAppleHrtfGain *
+                            (appleFilter.coefficients[1][lower] * (1.0f - fraction) +
+                                appleFilter.coefficients[1][upper] * fraction) / sampleRateRatio;
+                    }
+                    delayLeft = appleFilter.modelingDelaySamples / kAppleHrtfSampleRate;
+                    delayRight = delayLeft;
+                }
+                else
+                {
+                    mysofa_getfilter_float(
+                        hrtf->easy,
+                        position[0],
+                        position[1],
+                        position[2],
+                        rawLeft.data(),
+                        rawRight.data(),
+                        &delayLeft,
+                        &delayRight);
+                }
 
                 const std::array<const float*, 2> raw{{rawLeft.data(), rawRight.data()}};
                 const std::array<float, 2> delays{{delayLeft, delayRight}};
@@ -453,7 +502,10 @@ struct Spatializer::Impl final
             return;
         }
 
-        if (auto selection = requestedHrtf.exchange(nullptr, std::memory_order_relaxed))
+        if (auto selection = std::atomic_exchange_explicit(
+            &requestedHrtf,
+            std::shared_ptr<const HrtfSelection>{},
+            std::memory_order_relaxed))
         {
             activeProfile = std::move(selection->profile);
             hrtf = std::move(selection->hrtf);
@@ -532,14 +584,14 @@ struct Spatializer::Impl final
     RoomModel room;
     std::shared_ptr<SharedHrtf> hrtf;
     std::shared_ptr<const HrtfProfile> activeProfile;
-    std::atomic<std::shared_ptr<const HrtfSelection>> requestedHrtf{};
+    std::shared_ptr<const HrtfSelection> requestedHrtf;
     std::atomic<int> requestedMode{static_cast<int>(Mode::Off)};
     std::atomic<bool> resetRequested{false};
     std::atomic<float> requestedYaw{0.0f};
     std::atomic<float> requestedPitch{0.0f};
     std::atomic<float> requestedStageWidth{68.0f};
     std::atomic<float> requestedRoomReflection{0.08f};
-    std::atomic<float> requestedHrtfBlend{0.85f};
+    std::atomic<float> requestedHrtfBlend{1.0f};
     Mode activeMode = Mode::Off;
     float smoothedYaw = 0.0f;
     float smoothedPitch = 0.0f;
@@ -593,7 +645,7 @@ void Spatializer::SetRoomReflection(float amount)
 void Spatializer::SetHrtfBlend(float amount)
 {
     impl_->requestedHrtfBlend.store(
-        std::isfinite(amount) ? std::clamp(amount, 0.0f, 1.0f) : 0.85f,
+        std::isfinite(amount) ? std::clamp(amount, 0.0f, 1.0f) : 1.0f,
         std::memory_order_relaxed);
 }
 
@@ -603,7 +655,11 @@ void Spatializer::SetHrtfProfile(std::shared_ptr<const HrtfProfile> profile)
     auto selection = std::make_shared<HrtfSelection>();
     selection->profile = std::move(profile);
     selection->hrtf = selection->profile->impl_->hrtf;
-    impl_->requestedHrtf.store(std::move(selection), std::memory_order_relaxed);
+    std::shared_ptr<const HrtfSelection> immutableSelection = std::move(selection);
+    std::atomic_store_explicit(
+        &impl_->requestedHrtf,
+        std::move(immutableSelection),
+        std::memory_order_relaxed);
 }
 
 void Spatializer::Reset()
@@ -613,7 +669,8 @@ void Spatializer::Reset()
 
 bool Spatializer::IsHrtfReady() const
 {
-    return impl_->hrtf != nullptr && impl_->hrtf->easy != nullptr;
+    return impl_->hrtf != nullptr &&
+        (impl_->hrtf->easy != nullptr || impl_->hrtf->apple != nullptr);
 }
 
 void Spatializer::Process(

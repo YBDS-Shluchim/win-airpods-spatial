@@ -20,6 +20,9 @@ function(stage_hrtf_assets target)
 			"${CMAKE_CURRENT_SOURCE_DIR}/assets/MIT_KEMAR_large_pinna.sofa"
 			"$<TARGET_FILE_DIR:${target}>/assets/MIT_KEMAR_large_pinna.sofa"
 		COMMAND ${CMAKE_COMMAND} -E copy_if_different
+			"${CMAKE_CURRENT_SOURCE_DIR}/assets/Apple_Generic_HRTF.bin"
+			"$<TARGET_FILE_DIR:${target}>/assets/Apple_Generic_HRTF.bin"
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different
 			"${CMAKE_CURRENT_SOURCE_DIR}/assets/THIRD_PARTY_NOTICES.md"
 			"$<TARGET_FILE_DIR:${target}>/assets/THIRD_PARTY_NOTICES.md"
 		VERBATIM)
@@ -43,7 +46,7 @@ FetchContent_Declare(miniaudio_source
 	SOURCE_SUBDIR cmake-header-only)
 FetchContent_MakeAvailable(miniaudio_source)
 
-add_library(magic_aap_spatial_dsp spatializer.cpp)
+add_library(magic_aap_spatial_dsp spatializer.cpp apple_hrtf.cpp)
 target_compile_features(magic_aap_spatial_dsp PUBLIC cxx_std_20)
 target_include_directories(magic_aap_spatial_dsp PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(magic_aap_spatial_dsp PUBLIC ${MYSOFA_TARGET})

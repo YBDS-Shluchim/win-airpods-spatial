@@ -339,8 +339,8 @@ void CreateControls(PlayerWindow& app)
         32,
         kHrtfBlendId);
     SendMessageW(app.hrtfBlend, TBM_SETRANGE, TRUE, MAKELPARAM(0, 100));
-    SendMessageW(app.hrtfBlend, TBM_SETPOS, TRUE, 85);
-    app.hrtfBlendValue = AddControl(app.window, L"STATIC", L"85%", SS_RIGHT, 618, 344, 102, 28, kHrtfBlendValueId);
+    SendMessageW(app.hrtfBlend, TBM_SETPOS, TRUE, 100);
+    app.hrtfBlendValue = AddControl(app.window, L"STATIC", L"100%", SS_RIGHT, 618, 344, 102, 28, kHrtfBlendValueId);
 
     AddControl(app.window, L"STATIC", L"Speaker width", SS_LEFT, 24, 389, 150, 24);
     app.widthSlider = AddControl(app.window, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_AUTOTICKS | WS_TABSTOP, 24, 416, 570, 32, kWidthSliderId);
